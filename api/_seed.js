@@ -56,6 +56,12 @@ module.exports = {
       { titulo: 'Design', texto: 'Peças estáticas, carrosséis e identidade visual.' }
     ],
 
+    planos: [
+      { titulo: 'P1', texto: 'Descreva aqui o que o plano P1 inclui (quantidade de posts, stories, vídeos, reuniões…).' },
+      { titulo: 'P2', texto: 'Descreva aqui o que o plano P2 inclui.' },
+      { titulo: 'P3', texto: 'Descreva aqui o que o plano P3 inclui.' }
+    ],
+
     /* ---- BOAS PRÁTICAS ---- */
     boasPraticas: [
       { titulo: 'Comunicação com o cliente', categoria: 'Atendimento', texto: 'Responder no mesmo dia útil, mesmo que seja para dizer quando vai ter a resposta completa.' },

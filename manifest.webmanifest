@@ -1,0 +1,21 @@
+{
+  "name": "Studio Pulga · Painel",
+  "short_name": "Studio Pulga",
+  "description": "Tarefas, calendário e clientes da equipe Studio Pulga.",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F6EFE6",
+  "theme_color": "#6E2C14",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Minhas tarefas", "url": "/#/tarefas" },
+    { "name": "Calendário", "url": "/#/calendario" },
+    { "name": "Painel de gestão", "url": "/admin" }
+  ]
+}
