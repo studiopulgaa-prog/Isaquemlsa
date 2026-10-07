@@ -8,7 +8,7 @@ const PERMISSOES = [
   { k: 'gerenciar_publicacoes', grupo: 'Gestão', t: 'Gerenciar agenda de publicações', d: 'Cria, edita e exclui as publicações da semana (cliente, formato, dia, horário e responsável).' },
   { k: 'editar_clientes', grupo: 'Clientes', t: 'Editar fichas de clientes', d: 'Altera os dados da ficha: serviço, plano, saúde, identidade visual (paleta, música, tipografias), observações, sobre, objetivo, posicionamento, ideias, pontos de atenção e como agir.' },
   { k: 'gerenciar_clientes', grupo: 'Clientes', t: 'Adicionar e remover clientes', d: 'Cadastra clientes novos, remove clientes da lista e anexa o onboarding e o formulário (PDF).' },
-  { k: 'editar_fluxograma', grupo: 'Conteúdo', t: 'Editar fluxograma', d: 'Edita, escreve, adiciona, exclui e muda a ordem das etapas (jornada, produção e stories).' },
+  { k: 'editar_fluxograma', grupo: 'Conteúdo', t: 'Editar fluxograma', d: 'Edita, escreve, adiciona, exclui e muda a ordem das etapas (jornada, produção e stories) e cria fluxogramas novos.' },
   { k: 'editar_processos', grupo: 'Conteúdo', t: 'Editar processos', d: 'Edita o checklist de qualidade, os padrões, o playbook por nicho, a divisão de papéis e a explicação dos planos.' },
   { k: 'editar_praticas', grupo: 'Conteúdo', t: 'Editar boas práticas', d: 'Edita, adiciona, exclui e marca como restritas as boas práticas.' },
   { k: 'editar_inicio', grupo: 'Conteúdo', t: 'Editar rituais e atalhos', d: 'Edita os rituais da semana, os atalhos da tela inicial e o texto da Rede Conceito.' },
@@ -17,7 +17,7 @@ const PERMISSOES = [
 
 // Qual permissão edita cada bloco de conteúdo
 const CHAVE_PERM = {
-  jornada: 'editar_fluxograma', producao: 'editar_fluxograma', stories: 'editar_fluxograma',
+  jornada: 'editar_fluxograma', producao: 'editar_fluxograma', stories: 'editar_fluxograma', fluxosExtras: 'editar_fluxograma',
   padroes: 'editar_processos', papeis: 'editar_processos', qa: 'editar_processos', nichos: 'editar_processos', planos: 'editar_processos',
   boasPraticas: 'editar_praticas',
   rituais: 'editar_inicio', links: 'editar_inicio', redeConceito: 'editar_inicio'

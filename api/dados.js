@@ -24,17 +24,19 @@ module.exports = async (req, res) => {
     const tarefas = verTodas ? d.tarefas : d.tarefas.filter(t => t.membro_id === me.id);
     // Eventos sem participantes valem para a equipe toda
     const eventos = (d.eventos || []).filter(e => verTodas || pode(me, 'gerenciar_calendario') || !(e.participantes || []).length || e.participantes.includes(me.id));
-    const membros = pode(me, 'gerenciar_equipe') && area === 'admin'
+    const membros = pode(me, 'gerenciar_equipe')
       ? d.membros
       : d.membros.map(m => Object.assign({ id: m.id, nome: m.nome, funcao: m.funcao, ordem: m.ordem }, pode(me, 'acesso_gestao') ? { email: m.email } : {}));
     // Caixa de entrada: o que chegou para mim + recados que eu enviei (para ver se já leram)
-    const avisos = (d.avisos || []).filter(a => a.membro_id === me.id || (a.tipo === 'recado' && a.de_id === me.id));
+    // Gestão acompanha todas as solicitações de atendimento
+    const avisos = (d.avisos || []).filter(a => a.membro_id === me.id || (['recado', 'solicitacao'].includes(a.tipo) && a.de_id === me.id)
+      || (a.tipo === 'solicitacao' && pode(me, 'acesso_gestao')));
 
     const perms = PERMISSOES.map(p => p.k).filter(k => pode(me, k));
     send(res, 200, {
       ok: true, area,
-      me: { id: me.id, nome: me.nome, funcao: me.funcao, usuario: me.usuario, email: me.email || '', dono: me.dono, perms },
-      permissoes: area === 'admin' ? PERMISSOES : [],
+      me: { id: me.id, nome: me.nome, funcao: me.funcao, usuario: me.usuario, email: me.email || '', dono: me.dono, perms, tutorial_versao: me.tutorial_versao || 0 },
+      permissoes: pode(me, 'acesso_gestao') ? PERMISSOES : [],
       clientes: d.clientes, conteudo, tarefas, publicacoes: d.publicacoes, membros,
       eventos, notas: d.notas || [], arquivos: d.arquivos || [], avisos, contatos: d.contatos || []
     });

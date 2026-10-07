@@ -145,10 +145,48 @@ module.exports = async (req, res) => {
       }
       case 'recado_excluir': {
         const a = await rpc('get', { tabela: 'eq_avisos', id: uuid(b.id) });
-        exigir(a && a.tipo === 'recado' && (a.de_id === me.id || P('gerenciar_equipe')));
+        exigir(a && ['recado', 'solicitacao'].includes(a.tipo) && (a.de_id === me.id || P('gerenciar_equipe')));
         await rpc('remover', { tabela: 'eq_avisos', id: a.id });
         break;
       }
+      // ---------- SOLICITAÇÕES DE ATENDIMENTO (gestão pede, colaborador atende) ----------
+      case 'solicitacao_enviar': {
+        exigir(gestao, 'Só a gestão envia solicitações.');
+        const para = uuids(b.membros);
+        const texto = str(b.texto, 1000);
+        exigir(para.length && texto, 'Escolha quem atende e descreva a solicitação.');
+        const prazo = b.prazo_em && !isNaN(Date.parse(b.prazo_em)) ? new Date(b.prazo_em).toISOString() : null;
+        out.rows = [];
+        for (const id of para) {
+          out.rows.push(await rpc('upsert', { tabela: 'eq_avisos', row: {
+            membro_id: id, de_id: me.id, tipo: 'solicitacao', titulo: str(b.titulo, 160) || `Solicitação de ${me.nome}`,
+            texto, urgente: !!b.urgente, prazo_em: prazo
+          } }));
+        }
+        break;
+      }
+      case 'solicitacao_atender': {
+        const a = await rpc('get', { tabela: 'eq_avisos', id: uuid(b.id) });
+        exigir(a && a.tipo === 'solicitacao' && a.membro_id === me.id, 'Solicitação não encontrada.');
+        const agora = new Date().toISOString();
+        out.row = await rpc('upsert', { tabela: 'eq_avisos', row: { id: a.id, atendido_em: agora, lido_em: a.lido_em || agora, resposta: str(b.resposta, 600) } });
+        if (a.de_id && a.de_id !== me.id) {
+          await avisar({ membro_id: a.de_id, de_id: me.id, tipo: 'atendida', titulo: a.titulo,
+            texto: `${me.nome} atendeu: "${str(a.texto, 120)}"${out.row.resposta ? ` — ${out.row.resposta}` : ''}` });
+        }
+        break;
+      }
+
+      // ---------- TUTORIAL E REGISTRO DE ACESSOS ----------
+      case 'tutorial_visto':
+        out.row = await rpc('upsert', { tabela: 'eq_membros', row: { id: me.id, tutorial_versao: Math.max(0, Math.min(1000, Number(b.versao) || 0)) } });
+        out.row = { tutorial_versao: out.row.tutorial_versao };
+        break;
+      case 'acessos':
+        exigir(me.dono, 'Só o dono vê o registro de acessos.');
+        out.rows = await rpc('acessos_listar', { dias: Number(b.dias) || 30 });
+        break;
+
       case 'contato_salvar': {
         const e = email(b.email);
         exigir(e, 'E-mail inválido.');
@@ -170,8 +208,17 @@ module.exports = async (req, res) => {
           cliente_id: uuid(r.cliente_id), participantes: uuids(r.participantes)
         };
         exigir(row.titulo && row.data, 'Preencha o título e o dia.');
-        if (uuid(r.id)) row.id = r.id; else row.criado_por = me.id;
+        const novo = !uuid(r.id);
+        if (novo) row.criado_por = me.id; else row.id = r.id;
         out.row = await rpc('upsert', { tabela: 'eq_eventos', row });
+        if (novo) {
+          // Sem participantes = equipe toda
+          const todos = row.participantes.length ? row.participantes : ((await rpc('dump')).membros || []).map(m => m.id);
+          for (const id of todos.filter(id => id !== me.id)) {
+            await avisar({ membro_id: id, de_id: me.id, tipo: 'novo_evento', titulo: row.titulo, tarefa_id: out.row.id,
+              texto: `${me.nome} marcou no calendário: ${dataBr(row.data)}${row.hora ? ' às ' + row.hora : ''}.` });
+          }
+        }
         break;
       }
       case 'evento_status': {
@@ -285,7 +332,10 @@ module.exports = async (req, res) => {
           ideias: lista(r.ideias), atencao: lista(r.atencao), como_agir: lista(r.como_agir),
           paleta: str(r.paleta, 400), musica: str(r.musica, 300), tipografia_feed: str(r.tipografia_feed, 200),
           tipografia_story: str(r.tipografia_story, 200), tipografia_muda: str(r.tipografia_muda, 400),
-          observacoes: str(r.observacoes, 3000), atualizado_em: new Date().toISOString()
+          observacoes: str(r.observacoes, 3000),
+          links: (Array.isArray(r.links) ? r.links : []).map(l => ({ titulo: str(l && l.titulo, 80), url: str(l && l.url, 500) }))
+            .filter(l => /^https?:\/\/[^\s]+$/i.test(l.url)).slice(0, 30),
+          atualizado_em: new Date().toISOString()
         };
         exigir(row.nome, 'Preencha o nome do cliente.');
         if (novo) row.slug = slugify(row.nome) + '-' + Date.now().toString(36).slice(-4); else row.id = r.id;

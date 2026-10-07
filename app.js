@@ -41,6 +41,12 @@
     inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
     mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/>',
     megaphone: '<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
+    bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+    eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+    hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>',
+    collapse: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M16 15l-3-3 3-3"/>',
+    expand: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M14 9l3 3-3 3"/>',
+    help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/>',
     board: '<rect x="3" y="3" width="7" height="18" rx="1.5"/><rect x="14" y="3" width="7" height="11" rx="1.5"/>'
   };
   const ic = (n, s) => `<svg viewBox="0 0 24 24"${s ? ` width="${s}" height="${s}"` : ''} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -50,7 +56,9 @@
   try { const m = localStorage.getItem('sp_modo_tarefas'); if (m === 'quadro' || m === 'semana') S.modo = m; } catch {}
 
   const can = p => !!D && D.me.perms.includes(p);
-  const edita = p => AREA === 'admin' && can('acesso_gestao') && can(p);
+  // Quem é da gestão edita em qualquer lugar (site, /admin ou app no celular), conforme as permissões
+  const gestao = () => can('acesso_gestao');
+  const edita = p => gestao() && can(p);
   const verTodas = () => can('ver_tarefas_equipe') || can('gerenciar_tarefas');
 
   /* ---------------- datas ---------------- */
@@ -125,6 +133,7 @@
   /* ---------------- caixa de entrada ---------------- */
   const meusAvisos = () => (D.avisos || []).filter(a => a.membro_id === D.me.id);
   const naoLidos = () => meusAvisos().filter(a => !a.lido_em);
+  const eventoNovo = e => naoLidos().some(a => a.tipo === 'novo_evento' && a.tarefa_id === e.id) || (e.criado_por === D.me.id && Date.now() - new Date(e.criado_em) < 6 * 36e5);
   const tarefaNova = t => naoLidos().some(a => a.tipo === 'nova_tarefa' && a.tarefa_id === t.id);
   async function marcarLido(filtro) {
     const alvo = naoLidos().filter(filtro);
@@ -140,16 +149,22 @@
     const n = naoLidos().length;
     b.innerHTML = ic('inbox') + (n ? `<b class="ibadge">${n > 9 ? '9+' : n}</b>` : '');
     b.classList.toggle('tem', !!n);
+    document.title = (n ? `(${n}) ` : '') + document.title.replace(/^\(\d+\) /, '');
+    try { if (n && navigator.setAppBadge) navigator.setAppBadge(n); else if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch {}
   }
-  const TIPO_AVISO = { nova_tarefa: ['Nova tarefa', 'task', 'info'], concluida: ['Concluída', 'check', 'ok'], recado: ['Recado', 'megaphone', 'warn'] };
+  const TIPO_AVISO = {
+    nova_tarefa: ['Nova tarefa', 'task', 'info'], concluida: ['Concluída', 'check', 'ok'], recado: ['Recado', 'megaphone', 'warn'],
+    solicitacao: ['Solicitação', 'hand', 'danger'], atendida: ['Solicitação atendida', 'check', 'ok'], novo_evento: ['Novo no calendário', 'month', 'info']
+  };
   function abrirInbox() {
     const lista = meusAvisos().slice(0, 60);
     const ov = modal('Caixa de entrada', lista.length ? `<div class="inbox">${lista.map(a => {
       const t = TIPO_AVISO[a.tipo] || TIPO_AVISO.recado;
-      return `<button type="button" class="ib-item${a.lido_em ? '' : ' unread'}${a.urgente ? ' urg' : ''}" data-aviso="${a.id}">
+      return `<button type="button" class="ib-item${a.lido_em ? '' : ' unread'}${a.urgente ? ' urg' : ''}${a.tipo === 'solicitacao' && !a.atendido_em ? ' pend' : ''}" data-aviso="${a.id}">
         <span class="ib-ic ${t[2]}">${ic(t[1], 16)}</span>
         <span class="ib-b"><span class="ib-t"><b>${esc(a.tipo === 'recado' ? (a.urgente ? 'Recado urgente' : 'Recado') : t[0])}</b> · ${esc(a.de_id ? primeiroNome(nomeMembro(a.de_id)) : 'Sistema')} <small>${dataHoraBr(a.criado_em)}</small></span>
-        <span class="ib-s">${esc(a.tipo === 'recado' ? a.texto : a.titulo)}</span>${a.tipo !== 'recado' && a.texto ? `<span class="ib-x">${esc(a.texto)}</span>` : ''}</span>
+        <span class="ib-s">${esc(['recado', 'solicitacao'].includes(a.tipo) ? a.texto : a.titulo)}</span>${!['recado', 'solicitacao'].includes(a.tipo) && a.texto ? `<span class="ib-x">${esc(a.texto)}</span>` : ''}
+        ${a.tipo === 'solicitacao' ? `<span class="ib-x">${a.atendido_em ? '✓ Atendida ' + dataHoraBr(a.atendido_em) : `Pendente${a.prazo_em ? ' · até ' + dataHoraBr(a.prazo_em) : ''}`}</span>` : ''}</span>
         ${a.lido_em ? '' : '<span class="ib-dot"></span>'}</button>`;
     }).join('')}</div>` : '<div class="empty">Nada por aqui ainda. Quando alguém criar uma tarefa para você ou mandar um recado, chega aqui.</div>', null, {
       semFoco: true,
@@ -160,7 +175,9 @@
           marcarLido(x => x.id === a.id || (a.tarefa_id && x.tarefa_id === a.tarefa_id));
           fechar();
           render(true);
-          if (a.tarefa_id) { const t = D.tarefas.find(x => x.id === a.tarefa_id); if (t) abrirTarefa(t); else toast('Esta tarefa não está mais disponível.'); }
+          if (a.tipo === 'solicitacao' && !a.atendido_em) atenderSolicitacao(a);
+          else if (a.tipo === 'novo_evento') { const e = (D.eventos || []).find(x => x.id === a.tarefa_id); if (e) { S.diaSel = e.data; location.hash = '#/calendario'; setTimeout(() => abrirEvento(e), 60); } else location.hash = '#/calendario'; }
+          else if (a.tarefa_id) { const t = D.tarefas.find(x => x.id === a.tarefa_id); if (t) abrirTarefa(t); else toast('Esta tarefa não está mais disponível.'); }
         }));
         const bt = form.querySelector('[data-todos]');
         if (bt) bt.addEventListener('click', () => { marcarLido(() => true); fechar(); render(true); });
@@ -205,6 +222,7 @@
     if (meta) meta.content = temaAtual() === 'dark' ? '#21170F' : '#FFFDF9';
   }
   try { const t = localStorage.getItem('sp_tema'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+  try { if (localStorage.getItem('sp_menu') === 'mini') document.body.classList.add('side-mini'); } catch {}
 
   /* ---------------- login ---------------- */
   function mostrarLogin(msg) {
@@ -237,10 +255,17 @@
     if (status === 403) return mostrarLogin('Seu login não tem acesso ao painel de gestão.<br><a href="/">Ir para o site da equipe</a>');
     if (!j.ok) return mostrarLogin(esc(j.erro || 'Erro ao carregar. Tente de novo.'));
     D = j;
+    protegerConteudo();
+    const ult = (D.avisos || []).filter(a => a.membro_id === D.me.id).map(a => a.criado_em).sort().pop();
+    ultimoAviso = ult || null;
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
     montarTopo();
     render();
+    // Primeiro acesso: tutorial completo. Depois de uma atualização grande: só "o que mudou".
+    const visto = Number(D.me.tutorial_versao) || 0;
+    if (visto < 1) setTimeout(iniciarTutorial, 500);
+    else if (visto < VERSAO_TUTORIAL) setTimeout(() => mostrarNovidades(visto), 500);
   }
 
   let recarregando = null;
@@ -249,13 +274,60 @@
     recarregando = (async () => {
       const { status, j } = await api('/api/dados?area=' + AREA);
       if (status === 401) return mostrarLogin('Sua sessão expirou. Entre de novo.');
-      if (j.ok) { const antes = D ? naoLidos().length : 0; D = j; atualizarInbox(); if (naoLidos().length > antes) toast('Chegou algo novo na sua caixa de entrada'); if (!document.querySelector('.overlay')) render(true); }
+      if (j.ok) {
+        const antes = D ? naoLidos().map(a => a.id) : [];
+        D = j; atualizarInbox();
+        const novos = naoLidos().filter(a => !antes.includes(a.id));
+        if (novos.length) {
+          tocarAviso();
+          const a = novos[0];
+          toast(novos.length > 1 ? `${novos.length} novidades na sua caixa de entrada` : a.tipo === 'recado' ? `Novo recado de ${primeiroNome(nomeMembro(a.de_id))}` : a.tipo === 'solicitacao' ? `Nova solicitação de ${primeiroNome(nomeMembro(a.de_id))}` : `Novidade: ${a.titulo}`);
+        }
+        if (!document.querySelector('.overlay')) render(true);
+      }
     })();
     try { await recarregando; } finally { recarregando = null; }
   }
   // Mantém os dados frescos quando a pessoa volta para a aba
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && D) recarregar(); });
-  setInterval(() => { if (D && document.visibilityState === 'visible' && !document.querySelector('.overlay')) recarregar(); }, 120000);
+  // A cada 20s (com o painel visível): registra o tempo de uso e vê se chegou algo na caixa de entrada.
+  // Só baixa tudo de novo quando há novidade — por isso o aviso chega em até ~20s sem pesar.
+  const novaSessao = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+  let sessao = novaSessao(), ultimoVisto = Date.now(), ultimoAviso = null;
+  async function ping() {
+    if (!D || document.visibilityState !== 'visible') return;
+    if (Date.now() - ultimoVisto > 5 * 60e3) sessao = novaSessao(); // voltou depois de 5 min: conta como novo acesso
+    ultimoVisto = Date.now();
+    const app = matchMedia('(display-mode: standalone)').matches || !!navigator.standalone;
+    const { status, j } = await api('/api/ping', { sessao, area: AREA, app });
+    if (status === 401) return mostrarLogin('Sua sessão expirou. Entre de novo.');
+    if (!j.ok) return;
+    if (j.nao_lidos !== naoLidos().length || (j.ultimo && ultimoAviso && j.ultimo > ultimoAviso)) recarregar();
+    if (j.ultimo) ultimoAviso = j.ultimo;
+  }
+  setInterval(ping, 20000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ping(); });
+
+  // Som curtinho de notificação (o navegador só libera som depois do primeiro toque na tela)
+  let audio = null;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const somLigado = () => { try { return localStorage.getItem('sp_som') !== 'off'; } catch { return true; } };
+  addEventListener('pointerdown', () => { try { audio = audio || (AC && new AC()); if (audio && audio.state === 'suspended') audio.resume(); } catch {} }, { passive: true });
+  function tocarAviso() {
+    if (!somLigado() || !audio) return;
+    try {
+      const t = audio.currentTime;
+      [[880, 0], [1318.5, .13]].forEach(([f, d]) => {
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t + d);
+        g.gain.exponentialRampToValueAtTime(0.22, t + d + .02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + d + .38);
+        o.connect(g); g.connect(audio.destination); o.start(t + d); o.stop(t + d + .42);
+      });
+    } catch {}
+    if (navigator.vibrate) navigator.vibrate(60);
+  }
 
   /* ---------------- topo e menu ---------------- */
   function montarTopo() {
@@ -290,6 +362,7 @@
     const atrasadas = minhas.filter(t => sitTarefa(t) === 'atrasada').length;
     const itens = [
       ['inicio', 'home', 'Início'],
+      ...(gestao() ? [['solicitacoes', 'hand', 'Solicitações de atendimento', solicPend()]] : []),
       ['tarefas', 'task', 'Tarefas', atrasadas],
       ['calendario', 'month', 'Calendário'],
       ['agenda', 'cal', 'Publicações'],
@@ -300,17 +373,24 @@
       ['planos', 'plan', 'Planos'],
       ['praticas', 'star', 'Boas práticas'],
       ['g', 'Pessoas'],
-      ['equipe', 'team', AREA === 'admin' && can('gerenciar_equipe') ? 'Equipe e acessos' : 'Equipe']
+      ['equipe', 'team', can('gerenciar_equipe') ? 'Equipe e acessos' : 'Equipe']
     ];
-    if (AREA === 'admin' && can('gerenciar_tarefas')) itens.push(['desempenho', 'chart', 'Desempenho']);
+    if (can('gerenciar_tarefas')) itens.push(['desempenho', 'chart', 'Desempenho']);
+    if (D.me.dono) itens.push(['acessos', 'eye', 'Acessos']);
     const atual = rota()[0];
     let h = itens.map(i => i[0] === 'g'
       ? `<div class="grp">${i[1]}</div>`
-      : `<a href="#/${i[0]}" class="${atual === i[0] || (atual === 'cliente' && i[0] === 'clientes') ? 'on' : ''}">${ic(i[1])}<span>${i[2]}</span>${i[3] ? `<b class="badge" title="Atrasadas">${i[3]}</b>` : ''}</a>`).join('');
+      : `<a href="#/${i[0]}" title="${esc(i[2])}" class="${atual === i[0] || (atual === 'cliente' && i[0] === 'clientes') ? 'on' : ''}">${ic(i[1])}<span>${i[2]}</span>${i[3] ? `<b class="badge" title="Pendentes">${i[3]}</b>` : ''}</a>`).join('');
+    h += `<button class="side-toggle" data-recolher title="${document.body.classList.contains('side-mini') ? 'Expandir menu' : 'Recolher menu'}">${ic(document.body.classList.contains('side-mini') ? 'expand' : 'collapse')}<span>Recolher menu</span></button>`;
     const sw = $('#switch').innerHTML;
     if (sw) h += `<div class="side-mobile-switch"><div class="grp">Outro painel</div>${sw.replace('<a ', '<a style="padding-left:.75rem" ')}</div>`;
     if (instalar.disponivel()) h += `<div class="install"><button class="btn btn-ghost btn-sm" data-instalar>${ic('phone')}Instalar app no celular</button></div>`;
     $('#side').innerHTML = h;
+    $('#side [data-recolher]').addEventListener('click', () => {
+      const mini = document.body.classList.toggle('side-mini');
+      try { localStorage.setItem('sp_menu', mini ? 'mini' : 'cheio'); } catch {}
+      menu(); setTimeout(() => desenharFluxos(document), 220);
+    });
     const bi = $('#side [data-instalar]');
     if (bi) bi.addEventListener('click', instalar.abrir);
   }
@@ -326,6 +406,8 @@
   $('#senhaBtn').addEventListener('click', () => {
     modal('Minha conta', `
       <label>E-mail <span class="hint">(para receber avisos de prazos)</span><input type="email" name="email" value="${esc(D.me.email || '')}" placeholder="voce@gmail.com"></label>
+      <label class="inline"><input type="checkbox" name="_som"${somLigado() ? ' checked' : ''}> Tocar som quando chegar recado, solicitação ou tarefa</label>
+      <button type="button" class="btn btn-ghost btn-sm" data-tutorial style="justify-self:start">${ic('help', 14)}<span>Ver o tutorial de novo</span></button>
       <div class="sep">Trocar senha <span class="hint">(deixe em branco para manter)</span></div>
       <label>Senha atual<input type="password" name="atual" autocomplete="current-password"></label>
       <div class="two">
@@ -333,13 +415,15 @@
         <label>Repita a nova senha<input type="password" name="nova2" autocomplete="new-password"></label>
       </div>`,
     async f => {
+      try { localStorage.setItem('sp_som', f._som ? 'on' : 'off'); } catch {}
+      if (f._som) tocarAviso();
       if ((f.email || '') !== (D.me.email || '')) { await acao('meu_email', { email: f.email }); D.me.email = f.email; }
       if (f.nova || f.atual) {
         if (f.nova !== f.nova2) throw new Error('As senhas novas não são iguais.');
         await acao('minha_senha', { atual: f.atual, nova: f.nova });
       }
       toast('Conta atualizada.');
-    });
+    }, { setup: (form, { fechar }) => form.querySelector('[data-tutorial]').addEventListener('click', () => { fechar(); iniciarTutorial(); }) });
   });
 
   /* ---------------- instalar como app (PWA) ---------------- */
@@ -368,7 +452,7 @@
       <div class="foot">${opts.onDelete ? `<button type="button" class="btn btn-danger" data-del>${ic('trash')} ${esc(opts.delLabel || 'Excluir')}</button>` : ''}${opts.extra || ''}
       <div class="r"><button type="button" class="btn btn-ghost" data-close>${onSave ? 'Cancelar' : 'Fechar'}</button>${onSave ? `<button type="submit" class="btn btn-primary">${esc(opts.saveLabel || 'Salvar')}</button>` : ''}</div></div>
       </form></div>`;
-    const fechar = () => { ov.remove(); document.removeEventListener('keydown', tecla); if (opts.onClose) opts.onClose(); };
+    const fechar = () => { ov.remove(); document.removeEventListener('keydown', tecla); if (!document.querySelector('.overlay')) document.documentElement.classList.remove('modal-aberto'); if (opts.onClose) opts.onClose(); };
     const tecla = e => { if (e.key === 'Escape') fechar(); };
     document.addEventListener('keydown', tecla);
     ov.addEventListener('mousedown', e => { if (e.target === ov) fechar(); });
@@ -396,6 +480,7 @@
       if (confirm(opts.confirmDel || 'Tem certeza que quer excluir?')) rodar(opts.onDelete);
     });
     document.body.appendChild(ov);
+    document.documentElement.classList.add('modal-aberto');
     if (opts.setup) opts.setup(form, { fechar, rodar });
     const first = form.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=file]),textarea,select');
     if (first && !opts.semFoco) first.focus();
@@ -437,7 +522,7 @@
     const [r, a1, a2] = rota();
     const v = $('#view');
     posRender = [];
-    const telas = { inicio, tarefas, calendario, agenda, clientes, cliente: () => fichaCliente(a1, a2), fluxograma, processos, planos, praticas, equipe, desempenho };
+    const telas = { inicio, tarefas, calendario, agenda, clientes, cliente: () => fichaCliente(a1, a2), fluxograma, processos, planos, praticas, equipe, desempenho, solicitacoes, acessos };
     v.innerHTML = (telas[r] || inicio)();
     ligar(v);
     posRender.forEach(fn => fn(v));
@@ -453,6 +538,7 @@
     }));
     v.querySelectorAll('[data-set]').forEach(el => el.addEventListener('change', () => {
       S[el.dataset.set] = el.value;
+      if (el.dataset.set === 'diasAcesso') acessosCache = null;
       if (el.dataset.set === 'area') S.pessoa = '';
       render(true);
     }));
@@ -537,9 +623,9 @@
     const seg = segunda(0);
     const semana = [...Array(7)].map((_, i) => somaDias(seg, i));
     const cont = s => abertas.filter(t => sitTarefa(t) === s).length;
-    const podeRecado = AREA === 'admin' && can('acesso_gestao');
+    const podeRecado = gestao();
     return `<div class="with-panel"><div>` +
-      cab(`${saud}, ${primeiroNome(D.me.nome)}!`, [D.me.funcao, AREA === 'admin' ? 'Painel de gestão' : ''].filter(Boolean).map(esc).join(' · '),
+      cab(`${saud}, ${primeiroNome(D.me.nome)}!`, [D.me.funcao, gestao() ? 'Gestão' : ''].filter(Boolean).map(esc).join(' · '),
         (podeRecado ? btn('recadoNovo', 'Enviar recado', 'megaphone', 'btn-ghost') : '') + btn('tarefaNova', 'Nova tarefa', 'plus', 'btn-primary')) +
       blocoRecados() + (podeRecado ? recadosEnviados() : '') +
       `<div class="stats">
@@ -570,8 +656,13 @@
   // Recados da gestão para mim: ficam no topo até eu marcar como lido
   function blocoRecados() {
     const l = meusAvisos().filter(a => a.tipo === 'recado' && !a.lido_em);
-    if (!l.length) return '';
-    return `<div class="recados">${l.map(a => `<div class="recado${a.urgente ? ' urg' : ''}">
+    const sol = minhasSolic();
+    if (!l.length && !sol.length) return '';
+    return `<div class="recados">${sol.map(a => `<div class="recado sol-card${a.urgente ? ' urg' : ''}" data-act="atenderSolic" data-id="${a.id}" role="button" tabindex="0">
+      <div class="rc-ic">${ic('hand', 20)}</div>
+      <div class="rc-b"><div class="rc-h"><span class="tag ${a.urgente ? 'danger' : 'warn'}">Solicitação pendente</span><b>${esc(primeiroNome(nomeMembro(a.de_id)))}</b><small>${dataHoraBr(a.criado_em)}${a.prazo_em ? ' · ' + prazoSolic(a) : ''}</small></div>
+      <div class="rc-t">${esc(a.texto)}</div></div>
+      <button class="btn btn-sm btn-primary" data-act="atenderSolic" data-id="${a.id}">${ic('check', 14)}<span>Atender</span></button></div>`).join('')}${l.map(a => `<div class="recado${a.urgente ? ' urg' : ''}">
       <div class="rc-ic">${ic('megaphone', 20)}</div>
       <div class="rc-b"><div class="rc-h">${a.urgente ? '<span class="tag danger">Urgente</span>' : ''}<b>Recado de ${esc(primeiroNome(nomeMembro(a.de_id)))}</b><small>${dataHoraBr(a.criado_em)}</small></div>
       <div class="rc-t">${esc(a.texto)}</div></div>
@@ -651,6 +742,129 @@
     desenhar();
     // Se a pessoa digitou um e-mail válido e não clicou em "Adicionar", ele entra mesmo assim
     return () => { const v = inp.value.trim().toLowerCase(); if (validoEmail(v) && !lista.includes(v)) lista.push(v); return lista.slice(); };
+  }
+
+  /* ---------------- SOLICITAÇÕES DE ATENDIMENTO ---------------- */
+  const solicitacoesTodas = () => (D.avisos || []).filter(a => a.tipo === 'solicitacao');
+  const solicPend = () => solicitacoesTodas().filter(a => !a.atendido_em).length;
+  const minhasSolic = () => meusAvisos().filter(a => a.tipo === 'solicitacao' && !a.atendido_em);
+  function prazoSolic(a) {
+    if (!a.prazo_em) return '';
+    const min = Math.round((new Date(a.prazo_em) - Date.now()) / 6e4);
+    if (a.atendido_em) return `prazo ${dataHoraBr(a.prazo_em)}`;
+    if (min < 0) return `<span class="red-t">atrasada há ${duracao(-min * 6e4)}</span>`;
+    if (min < 60) return `<span class="yellow-t">vence em ${min} min</span>`;
+    return `até ${dataHoraBr(a.prazo_em)}`;
+  }
+  function solicitacoes() {
+    if (!gestao()) return inicio();
+    const l = solicitacoesTodas().sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+    const pend = l.filter(a => !a.atendido_em), feitas = l.filter(a => a.atendido_em);
+    const linha = a => `<div class="sol${a.atendido_em ? ' ok' : ''}${a.urgente && !a.atendido_em ? ' urg' : ''}">
+      <div class="sol-p"><span class="avatar xs">${esc(iniciais(nomeMembro(a.membro_id)))}</span><span><b>${esc(nomeMembro(a.membro_id))}</b><small>pedido por ${esc(primeiroNome(nomeMembro(a.de_id)))} · ${dataHoraBr(a.criado_em)}</small></span></div>
+      <div class="sol-t">${a.urgente ? '<span class="tag danger">Urgente</span> ' : ''}${esc(a.texto)}${a.resposta ? `<div class="sol-r">↳ ${esc(a.resposta)}</div>` : ''}</div>
+      <div class="sol-s">${a.atendido_em ? `<span class="tag ok">✓ Atendida</span><small>em ${duracao(new Date(a.atendido_em) - new Date(a.criado_em))}</small>` : `<span class="tag ${a.lido_em ? 'warn' : ''}">${a.lido_em ? 'Vista, pendente' : 'Ainda não vista'}</span><small>${prazoSolic(a)}</small>`}</div>
+      ${a.de_id === D.me.id || can('gerenciar_equipe') ? `<button class="icon-btn sm" data-act="recadoExcluir" data-id="${a.id}" title="Apagar">${ic('trash', 14)}</button>` : ''}
+    </div>`;
+    return cab('Solicitações de atendimento', 'Peça algo para alguém da equipe com prazo. Chega na caixa de entrada da pessoa (com som) e fica fixo no início dela até ser atendido.', btn('solicitacaoNova', 'Nova solicitação', 'plus', 'btn-primary')) +
+      `<h2 class="sec">Pendentes <span class="count">${pend.length}</span></h2>` + (pend.length ? `<div class="sols">${pend.map(linha).join('')}</div>` : vazio('Nenhuma solicitação pendente.')) +
+      `<h2 class="sec">Atendidas <span class="count">${feitas.length}</span></h2>` + (feitas.length ? `<div class="sols">${feitas.slice(0, 40).map(linha).join('')}</div>` : vazio('Nenhuma atendida ainda.'));
+  }
+  function formSolicitacao() {
+    const lista = [...D.membros].filter(m => m.id !== D.me.id).sort(porNome);
+    const daqui = h => { const d = new Date(Date.now() + h * 36e5); return `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+    modal('Nova solicitação de atendimento', `
+      <div><div class="lbl">Quem atende</div>
+        <div class="filters tight"><select data-fpart aria-label="Filtrar por função">${optAreas('')}</select>
+          <button type="button" class="btn btn-sm btn-ghost" data-todos>Marcar visíveis</button><button type="button" class="btn btn-sm btn-ghost" data-nenhum>Limpar</button></div>
+        <div class="people">${lista.map(m => `<label data-funcao="${esc(m.funcao || '')}"><input type="checkbox" name="part" value="${m.id}" data-multi="1"><span class="avatar xs">${esc(iniciais(m.nome))}</span><span>${esc(m.nome)}<small>${esc(m.funcao || 'Gestão')}</small></span></label>`).join('')}</div>
+      </div>
+      <label>O que precisa<textarea name="texto" maxlength="1000" required placeholder="Ex.: Cliente pediu um story urgente da promoção de hoje."></textarea></label>
+      <div class="two">
+        <label>Prazo<select name="_prazo"><option value="1">Em 1 hora</option><option value="2">Em 2 horas</option><option value="4">Em 4 horas</option><option value="hoje">Até o fim do dia</option><option value="">Sem prazo</option><option value="outro">Escolher data e hora…</option></select></label>
+        <label data-outro hidden>Data e hora<input type="datetime-local" name="_quando" value="${daqui(24)}"></label>
+      </div>
+      <label class="inline"><input type="checkbox" name="urgente"> Urgente (aparece em vermelho)</label>`,
+    async (f, form) => {
+      const membros = [...form.querySelectorAll('input[name=part]:checked')].map(c => c.value);
+      if (!membros.length) throw new Error('Escolha pelo menos uma pessoa.');
+      let prazo = null;
+      if (f._prazo === 'hoje') { const d = new Date(); d.setHours(23, 59, 0, 0); prazo = d.toISOString(); }
+      else if (f._prazo === 'outro') prazo = f._quando ? new Date(f._quando).toISOString() : null;
+      else if (f._prazo) prazo = new Date(Date.now() + Number(f._prazo) * 36e5).toISOString();
+      const j = await acao('solicitacao_enviar', { membros, texto: f.texto, urgente: f.urgente, prazo_em: prazo });
+      D.avisos = (j.rows || []).concat(D.avisos || []);
+      toast(membros.length === 1 ? 'Solicitação enviada.' : `Solicitação enviada para ${membros.length} pessoas.`);
+    }, { saveLabel: 'Enviar', setup: form => {
+      ligarPessoas(form);
+      const sel = form.querySelector('[name=_prazo]'), outro = form.querySelector('[data-outro]');
+      sel.addEventListener('change', () => { outro.hidden = sel.value !== 'outro'; });
+    } });
+  }
+  function atenderSolicitacao(a) {
+    modal(a.urgente ? 'Solicitação urgente' : 'Solicitação de atendimento', `
+      <div class="recado${a.urgente ? ' urg' : ''}" style="animation:none"><div class="rc-ic">${ic('hand', 20)}</div><div class="rc-b">
+        <div class="rc-h"><b>${esc(nomeMembro(a.de_id))}</b><small>${dataHoraBr(a.criado_em)}</small>${a.prazo_em ? `<small>· ${prazoSolic(a)}</small>` : ''}</div>
+        <div class="rc-t">${esc(a.texto)}</div></div></div>
+      <label>Resposta <span class="hint">(opcional — ex.: “feito, já está no Drive”)</span><textarea name="resposta" maxlength="600" style="min-height:60px"></textarea></label>`,
+    async f => {
+      const j = await acao('solicitacao_atender', { id: a.id, resposta: f.resposta });
+      Object.assign(a, j.row);
+      toast('Solicitação marcada como atendida ✓');
+    }, { saveLabel: 'Marcar como atendida', semFoco: true, setup: () => marcarLido(x => x.id === a.id) });
+  }
+
+  /* ---------------- ACESSOS (só o dono vê) ---------------- */
+  let acessosCache = null;
+  function acessos() {
+    if (!D.me.dono) return inicio();
+    const dias = Number(S.diasAcesso) || 7;
+    if (!acessosCache || acessosCache.dias !== dias) {
+      acessosCache = { dias, rows: null };
+      acao('acessos', { dias }).then(j => { acessosCache.rows = j.rows || []; if (rota()[0] === 'acessos') render(true); }).catch(e => { acessosCache.rows = []; toast(e.message); });
+    }
+    const rows = acessosCache.rows;
+    const dur = r => Math.max(60e3, new Date(r.ultimo) - new Date(r.inicio)); // mínimo 1 min por acesso
+    const cab_ = cab('Acessos', 'Quando e por quanto tempo cada pessoa usou o painel. Só você (dono) vê esta aba.',
+      `<select data-set="diasAcesso" aria-label="Período">${opcoes([['1', 'Hoje e ontem'], ['7', 'Últimos 7 dias'], ['30', 'Últimos 30 dias'], ['90', 'Últimos 90 dias']], String(dias))}</select>${btn('acessosAtualizar', 'Atualizar', '', 'btn-ghost')}`);
+    if (!rows) return cab_ + '<div class="loading">Carregando…</div>';
+    const pessoas = [...D.membros].sort(porNome).map(m => {
+      const l = rows.filter(r => r.membro_id === m.id);
+      return { m, l, total: l.reduce((s, r) => s + dur(r), 0), ultimo: l[0] };
+    }).sort((a, b) => (b.ultimo ? b.ultimo.ultimo : '').localeCompare(a.ultimo ? a.ultimo.ultimo : ''));
+    const online = r => r && Date.now() - new Date(r.ultimo) < 90e3;
+    return cab_ + `<div class="card table-card"><table class="perf"><thead><tr><th>Pessoa</th><th>Último acesso</th><th>Acessos</th><th>Tempo total</th><th>Média por acesso</th><th>Dispositivo</th></tr></thead><tbody>
+      ${pessoas.map(({ m, l, total, ultimo }) => `<tr class="${l.length ? 'click' : ''}" ${l.length ? `data-act="acessoDetalhe" data-id="${m.id}"` : ''}>
+        <td><div class="mem"><span class="avatar xs">${esc(iniciais(m.nome))}</span><span><b>${esc(m.nome)}</b><small class="muted">${esc(m.funcao || 'Gestão')}</small></span></div></td>
+        <td>${ultimo ? (online(ultimo) ? '<span class="green-t">● online agora</span>' : dataHoraBr(ultimo.ultimo)) : '<span class="muted">sem acesso</span>'}</td>
+        <td>${l.length}</td><td>${l.length ? duracao(total) : '—'}</td><td>${l.length ? duracao(total / l.length) : '—'}</td>
+        <td>${ultimo ? esc(ultimo.dispositivo) : '—'}</td></tr>`).join('')}
+    </tbody></table></div><p class="small muted" style="margin-top:.8rem">Clique numa pessoa para ver cada acesso. O tempo conta enquanto o painel está aberto e visível na tela.</p>`;
+  }
+  function detalheAcesso(id) {
+    const l = (acessosCache.rows || []).filter(r => r.membro_id === id);
+    modal(`Acessos de ${nomeMembro(id)}`, `<div class="card table-card"><table class="perf"><thead><tr><th>Entrou</th><th>Saiu</th><th>Tempo</th><th>Onde</th></tr></thead><tbody>
+      ${l.map(r => `<tr><td>${dataHoraBr(r.inicio)}</td><td>${dataHoraBr(r.ultimo)}</td><td>${duracao(Math.max(60e3, new Date(r.ultimo) - new Date(r.inicio)))}</td><td>${esc(r.dispositivo)} · ${r.area === 'admin' ? 'gestão' : 'equipe'}</td></tr>`).join('')}
+    </tbody></table></div>`, null, { wide: true, semFoco: true });
+  }
+
+  /* ---------------- PROTEÇÃO DE CONTEÚDO (colaboradores) ---------------- */
+  // Dificulta copiar dados: sem seleção de texto, sem copiar/colar, sem botão direito e marca d'água com o nome.
+  // Não impede foto da tela — mas a marca d'água mostra de quem é o acesso.
+  let protegido = false;
+  function protegerConteudo() {
+    const proteger = !gestao();
+    document.body.classList.toggle('protegido', proteger);
+    let wm = $('#marcaDagua');
+    if (!proteger) { if (wm) wm.remove(); return; }
+    if (!wm) { wm = document.createElement('div'); wm.id = 'marcaDagua'; wm.setAttribute('aria-hidden', 'true'); document.body.appendChild(wm); }
+    const txt = `${D.me.nome} · ${D.me.usuario} · ${new Date().toLocaleDateString('pt-BR')}`;
+    wm.innerHTML = Array(40).fill(`<span>${esc(txt)}</span>`).join('');
+    if (protegido) return;
+    protegido = true;
+    const bloqueia = e => { if (!document.body.classList.contains('protegido')) return; if (e.target.closest && e.target.closest('input,textarea,[contenteditable]')) return; e.preventDefault(); };
+    ['copy', 'cut', 'contextmenu', 'dragstart', 'selectstart'].forEach(ev => document.addEventListener(ev, bloqueia));
+    document.addEventListener('keydown', e => { if (document.body.classList.contains('protegido') && (e.ctrlKey || e.metaKey) && /^[spu]$/i.test(e.key)) e.preventDefault(); });
   }
 
   /* ---------------- TAREFAS ---------------- */
@@ -846,8 +1060,8 @@
           const n = it.ev.length + it.ts.length + it.ps.length;
           return `<button class="cal-d${d.getMonth() !== mes ? ' out' : ''}${s === h ? ' today' : ''}${s === S.diaSel ? ' sel' : ''}" data-act="diaSel" data-id="${s}">
             <span class="cd-n">${d.getDate()}</span>
-            <span class="cd-items">${it.ev.slice(0, 2).map(e => `<span class="cd-ev ${SIT[sitEvento(e)][0]}">${esc(e.titulo)}</span>`).join('')}</span>
-            <span class="cd-dots">${it.ts.slice(0, 6).map(t => dot(sitTarefa(t), t.titulo)).join('')}${it.ps.length ? `<span class="dot pub" title="${it.ps.length} publicação(ões)"></span>` : ''}${n > 8 ? '<span class="more">+</span>' : ''}</span>
+            <span class="cd-items">${it.ev.slice(0, 2).map(e => `<span class="cd-ev ${SIT[sitEvento(e)][0]}">${eventoNovo(e) ? '<b class="nova">Nova</b>' : ''}${esc(e.titulo)}</span>`).join('')}</span>
+            <span class="cd-dots">${it.ev.map(e => `<span class="dot ev ${SIT[sitEvento(e)][0]}${eventoNovo(e) ? ' pulse' : ''}" title="${esc(e.titulo)}"></span>`).join('')}${it.ts.slice(0, 6).map(t => dot(sitTarefa(t), t.titulo)).join('')}${it.ps.length ? `<span class="dot pub" title="${it.ps.length} publicação(ões)"></span>` : ''}${n > 8 ? '<span class="more">+</span>' : ''}</span>
           </button>`;
         }).join('')}</div>
         <div class="legend">${dot('atrasada')}Atrasado ${dot('perto')}Perto do prazo ${dot('ok')}Novo / no prazo ${dot('feito')}Feito <span class="dot pub"></span>Publicação</div>
@@ -855,7 +1069,7 @@
       <aside class="panel day-panel">
         <h3>${DIAS[selD.getDay()]}, ${selD.getDate()} de ${MESES[selD.getMonth()]}</h3>
         <button class="btn btn-primary btn-sm full" data-act="adicionarDia" data-id="${S.diaSel}">${ic('plus')}<span>Adicionar neste dia</span></button>
-        ${dSel.ev.length ? `<div class="pl-sec"><div class="pl-h">${ic('month', 14)}Eventos</div>${dSel.ev.map(e => `<button class="pl" data-act="eventoAbrir" data-id="${e.id}">${dot(sitEvento(e))}<span class="pl-t">${TIPO_EV[e.tipo] ? TIPO_EV[e.tipo][0] : ''} ${esc(e.titulo)}</span><span class="pl-d">${esc(e.hora || '')}</span></button>`).join('')}</div>` : ''}
+        ${dSel.ev.length ? `<div class="pl-sec"><div class="pl-h">${ic('month', 14)}Eventos</div>${dSel.ev.map(e => `<button class="pl" data-act="eventoAbrir" data-id="${e.id}">${dot(sitEvento(e))}<span class="pl-t">${eventoNovo(e) ? '<span class="nova">Nova</span>' : ''}${TIPO_EV[e.tipo] ? TIPO_EV[e.tipo][0] : ''} ${esc(e.titulo)}</span><span class="pl-d">${esc(e.hora || '')}</span></button>`).join('')}</div>` : ''}
         ${dSel.ts.length ? `<div class="pl-sec"><div class="pl-h">${ic('task', 14)}Prazos de tarefas</div>${dSel.ts.map(t => `<button class="pl" data-act="tarefaAbrir" data-id="${t.id}">${dot(sitTarefa(t))}<span class="pl-t">${esc(t.titulo)}</span><span class="pl-d">${esc(primeiroNome(nomeMembro(t.membro_id)))}</span></button>`).join('')}</div>` : ''}
         ${dSel.ps.length ? `<div class="pl-sec"><div class="pl-h">${ic('cal', 14)}Publicações</div>${dSel.ps.map(p => `<button class="pl" data-act="pubAbrir" data-id="${p.id}"><span class="dot pub"></span><span class="pl-t">${esc(nomeCliente(p.cliente_id))} · ${esc(p.formato || '')}</span><span class="pl-d">${esc(p.hora || '')}</span></button>`).join('')}</div>` : ''}
         ${!dSel.ev.length && !dSel.ts.length && !dSel.ps.length ? '<div class="pl-vazio">Nada neste dia.</div>' : ''}
@@ -864,6 +1078,7 @@
 
   function abrirEvento(e) {
     if (!e) return;
+    if (naoLidos().some(a => a.tipo === 'novo_evento' && a.tarefa_id === e.id)) { marcarLido(a => a.tipo === 'novo_evento' && a.tarefa_id === e.id); setTimeout(() => render(true), 0); }
     const sit = sitEvento(e);
     const participa = !(e.participantes || []).length || e.participantes.includes(D.me.id);
     const podeMarcar = e.tipo !== 'reuniao' && (participa || edita('gerenciar_calendario'));
@@ -1014,9 +1229,10 @@
       corpo = `<div class="ficha">
           ${kv.length ? `<div class="card"><h3>Dados</h3><dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>` : ''}
           ${plano ? `<div class="card"><h3>O que o ${esc(plano.titulo)} inclui</h3><div class="pre small">${esc(plano.texto || '')}</div><a class="small" href="#/planos">ver todos os planos</a></div>` : ''}
+          ${(c.links || []).length ? `<div class="card span2"><h3>Links úteis</h3><div class="links">${c.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${ic(iconeLink(l.url))}${esc(l.titulo || dominio(l.url))}</a>`).join('')}</div></div>` : ''}
           ${c.observacoes ? `<div class="card span2"><h3>Observações sobre o cliente</h3><div class="pre">${esc(c.observacoes)}</div></div>` : ''}
           ${LISTAS.filter(([k]) => (c[k] || []).length).map(([k, t]) => `<div class="card"><h3>${t}</h3><ul>${c[k].map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}
-        </div>` + (!kv.length && !c.observacoes && !LISTAS.some(([k]) => (c[k] || []).length) ? vazio('Ficha ainda sem informações.') : '');
+        </div>` + (!kv.length && !c.observacoes && !(c.links || []).length && !LISTAS.some(([k]) => (c[k] || []).length) ? vazio('Ficha ainda sem informações.') : '');
     } else if (aba === 'identidade') {
       const cs = cores(c.paleta);
       const muda = String(c.tipografia_muda || '');
@@ -1077,6 +1293,8 @@
         (edita('editar_clientes') ? btn('clienteEditar', 'Editar ficha', 'edit', 'btn-primary', c.id) : '')) +
       `<nav class="tabs">${ABAS.map(([k, t]) => `<a href="#/cliente/${c.id}/${k}" class="${aba === k ? 'on' : ''}">${t}${cont[k] ? ` <span class="count">${cont[k]}</span>` : ''}</a>`).join('')}</nav>` + corpo;
   }
+  const dominio = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+  const iconeLink = u => (/drive\.google|docs\.google/.test(u) ? 'file' : /trello|notion|asana|clickup/.test(u) ? 'board' : 'link');
   const segundaDe = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
 
   function formCliente(c = {}) {
@@ -1121,11 +1339,18 @@
         <label>Se muda, como?<input name="_muda_det" maxlength="300" value="${esc(mudaSim ? muda.replace(/^sim\s*[—:-]?\s*/i, '') : '')}" placeholder="Ex.: no CapCut usar Montserrat"></label>
       </div>
       <label>Observações sobre o cliente<textarea name="observacoes" maxlength="3000">${esc(c.observacoes || '')}</textarea></label>
+      <label>Links úteis <span class="hint">(um por linha: nome | link — ex.: Trello | https://trello.com/…)</span><textarea name="_links" placeholder="Trello | https://trello.com/b/…&#10;Drive | https://drive.google.com/…">${esc((c.links || []).map(l => (l.titulo ? l.titulo + ' | ' : '') + l.url).join('\n'))}</textarea></label>
       <div class="sep">Estratégia <span class="hint">(um item por linha)</span></div>
       ${LISTAS.map(([k, t]) => `<label>${t}<textarea name="${k}" style="min-height:70px">${lista(k)}</textarea></label>`).join('')}`,
     async f => {
       f.tipografia_muda = f._muda === 'sim' ? ('Sim' + (f._muda_det ? ' — ' + f._muda_det : '')) : f._muda === 'nao' ? 'Não' : '';
       delete f._muda; delete f._muda_det;
+      f.links = String(f._links || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+        const m = l.match(/^(.*?)\s*[|–-]\s*(https?:\/\/\S+)$/i) || l.match(/^()(https?:\/\/\S+)$/i);
+        if (!m) throw new Error(`Link inválido: "${l}". Use: nome | https://…`);
+        return { titulo: m[1].trim(), url: m[2] };
+      });
+      delete f._links;
       const j = await acao('cliente_salvar', { row: f });
       aplicar('clientes', j.row);
       if (!c.id) location.hash = '#/cliente/' + j.row.id;
@@ -1253,8 +1478,8 @@
   const itens = k => { const l = conteudo(k); return l.length ? `<div class="items">${l.map(itemHtml).join('')}</div>` : vazio('Nada cadastrado ainda.'); };
 
   // Fluxograma de verdade: balões ligados por linhas (SVG), redesenhado ao mudar o tamanho da tela
-  function fluxo(k) {
-    const l = conteudo(k);
+  function fluxo(k, lista) {
+    const l = lista || conteudo(k);
     if (!l.length) return vazio('Nada cadastrado ainda.');
     const minha = (D.me.funcao || '').toLowerCase();
     return `<div class="fc" data-fc>
@@ -1302,13 +1527,48 @@
   function fluxograma() {
     posRender.push(v => requestAnimationFrame(() => desenharFluxos(v)));
     return cab('Fluxograma', `Como o trabalho anda e quem executa cada etapa.${D.me.funcao ? ` Etapas destacadas são da sua função (${esc(D.me.funcao)}).` : ''}`) +
-      secBloco('jornada', fluxo('jornada')) + secBloco('producao', fluxo('producao')) + secBloco('stories', fluxo('stories'));
+      secBloco('jornada', fluxo('jornada')) + secBloco('producao', fluxo('producao')) + secBloco('stories', fluxo('stories')) +
+      conteudo('fluxosExtras').map((f, i) => `<h2 class="sec">${esc(f.titulo)} ${lock(f)}${edita('editar_fluxograma') ? `<span class="acts-inline">${btn('fluxoEditar', 'Editar', 'edit', 'btn-sm btn-ghost', String(i))}</span>` : ''}</h2>${fluxo(null, f.etapas || [])}`).join('') +
+      (edita('editar_fluxograma') ? `<div class="novo-fluxo">${btn('fluxoEditar', 'Criar novo fluxograma', 'plus', 'btn-primary', 'novo')}</div>` : '');
+  }
+  // Fluxogramas criados pela gestão (além de jornada, produção e stories)
+  function editarFluxoExtra(idx) {
+    const extras = conteudo('fluxosExtras').map(f => JSON.parse(JSON.stringify(f)));
+    const novo = idx === 'novo';
+    const f = novo ? { titulo: '', etapas: [{}, {}] } : extras[+idx];
+    editorLista({
+      titulo: novo ? 'Novo fluxograma' : `Editar: ${f.titulo}`,
+      campos: ['titulo', 'quem', 'texto'], itens: f.etapas || [],
+      topo: `<label>Nome do fluxograma<input data-nome maxlength="80" required value="${esc(f.titulo || '')}" placeholder="Ex.: Fluxo de captação"></label>${can('ver_restrito') ? `<label class="inline"><input type="checkbox" data-restr${f.restrito ? ' checked' : ''}> Restrito</label>` : ''}<div class="lbl">Etapas, na ordem</div>`,
+      apagar: novo ? null : async () => { extras.splice(+idx, 1); await acao('conteudo_salvar', { chave: 'fluxosExtras', valor: extras }); D.conteudo.fluxosExtras = extras; toast('Fluxograma apagado.'); },
+      salvar: async (etapas, form) => {
+        const titulo = form.querySelector('[data-nome]').value.trim();
+        if (!titulo) throw new Error('Dê um nome ao fluxograma.');
+        if (!etapas.length) throw new Error('Adicione pelo menos uma etapa.');
+        const item = { titulo, etapas };
+        const r = form.querySelector('[data-restr]');
+        if (r && r.checked) item.restrito = true;
+        if (novo) extras.push(item); else extras[+idx] = item;
+        await acao('conteudo_salvar', { chave: 'fluxosExtras', valor: extras });
+        D.conteudo.fluxosExtras = extras;
+        toast('Fluxograma salvo.');
+      }
+    });
   }
 
+  const qaChave = () => 'sp_qa_' + D.me.id;
+  const qaLer = () => { try { return JSON.parse(localStorage.getItem(qaChave()) || '[]'); } catch { return []; } };
+  const qaFeito = n => qaLer().includes(n);
+  function qaMarcar(n, on) {
+    const l = new Set(qaLer()); on ? l.add(n) : l.delete(n);
+    try { localStorage.setItem(qaChave(), JSON.stringify([...l])); } catch {}
+  }
   function processos() {
+    posRender.push(v => v.querySelectorAll('[data-qa]').forEach(c => c.addEventListener('change', () => { qaMarcar(+c.dataset.qa, c.checked); render(true); })));
     const qa = conteudo('qa');
     return cab('Processos', 'Padrões que garantem a qualidade das entregas.') +
-      secBloco('qa', qa.length ? `<div class="items">${qa.map(i => `<div class="item check"><span class="box"></span><div><div class="t">${esc(i.titulo)}${lock(i)}</div>${i.texto ? `<div class="d">${esc(i.texto)}</div>` : ''}</div></div>`).join('')}</div>` : vazio('Nada cadastrado ainda.')) +
+      secBloco('qa', qa.length ? `<div class="items">${qa.map((i, n) => `<label class="item check${qaFeito(n) ? ' feito' : ''}"><input type="checkbox" data-qa="${n}"${qaFeito(n) ? ' checked' : ''}><span class="box">${ic('check', 13)}</span><div><div class="t">${esc(i.titulo)}${lock(i)}</div>${i.texto ? `<div class="d">${esc(i.texto)}</div>` : ''}</div></label>`).join('')}</div>
+        <div class="qa-foot"><span class="small muted">${qa.filter((_, n) => qaFeito(n)).length} de ${qa.length} conferidos · fica salvo só para você</span>${btn('qaLimpar', 'Recomeçar checklist', '', 'btn-sm btn-ghost')}</div>` : vazio('Nada cadastrado ainda.')) +
       secBloco('padroes', itens('padroes')) + secBloco('nichos', itens('nichos')) + secBloco('papeis', itens('papeis'));
   }
 
@@ -1333,10 +1593,23 @@
   function editarBloco(k) {
     const cfg = BLOCOS[k];
     if (!cfg) return;
-    const lista = conteudo(k).map(x => Object.assign({}, x));
+    editorLista({
+      titulo: `Editar: ${cfg.t}`, campos: cfg.campos, itens: conteudo(k),
+      salvar: async valor => {
+        if (k === 'links' && valor.some(l => !/^https?:\/\//.test(l.url))) throw new Error('Os endereços dos atalhos precisam começar com https://');
+        await acao('conteudo_salvar', { chave: k, valor });
+        D.conteudo[k] = valor;
+        toast('Conteúdo salvo.');
+      }
+    });
+  }
+
+  // Editor de listas (itens com subir/descer/excluir) usado pelos blocos de conteúdo e pelos fluxogramas
+  function editorLista({ titulo, campos, itens, topo = '', salvar, apagar }) {
+    const lista = (itens || []).map(x => Object.assign({}, x));
     const podeRestrito = can('ver_restrito');
     const linhas = () => lista.map((it, i) => `<div class="ed-row" data-i="${i}">
-      <div class="fs">${cfg.campos.map(c => c === 'texto'
+      <div class="fs">${campos.map(c => c === 'texto'
         ? `<textarea data-c="texto" placeholder="${ROTULO[c]}" style="min-height:64px">${esc(it.texto || '')}</textarea>`
         : `<input data-c="${c}" placeholder="${ROTULO[c]}" value="${esc(it[c] || '')}"${c === 'quem' ? ' list="funcoesList"' : ''}>`).join('')}
         ${podeRestrito ? `<label class="chk"><input type="checkbox" data-c="restrito"${it.restrito ? ' checked' : ''}> Restrito (só quem tem acesso a conteúdo restrito vê)</label>` : ''}
@@ -1350,21 +1623,18 @@
       const it = lista[+r.dataset.i];
       r.querySelectorAll('[data-c]').forEach(el => { it[el.dataset.c] = el.type === 'checkbox' ? el.checked : el.value; });
     });
-    modal(`Editar: ${cfg.t}`, `<datalist id="funcoesList">${funcoes().map(f => `<option>${esc(f)}</option>`).join('')}</datalist><div class="ed-list"></div><button type="button" class="btn btn-ghost" data-add>${ic('plus')}Adicionar item</button>`,
+    modal(titulo, `<datalist id="funcoesList">${funcoes().map(f => `<option>${esc(f)}</option>`).join('')}</datalist>${topo}<div class="ed-list"></div><button type="button" class="btn btn-ghost" data-add>${ic('plus')}Adicionar item</button>`,
       async (_, form) => {
         ler(form);
         const valor = lista.map(it => {
           const o = {};
-          cfg.campos.forEach(c => { o[c] = String(it[c] || '').trim(); });
+          campos.forEach(c => { o[c] = String(it[c] || '').trim(); });
           if (it.restrito) o.restrito = true;
           return o;
         }).filter(o => o.titulo);
-        if (k === 'links' && valor.some(l => !/^https?:\/\//.test(l.url))) throw new Error('Os endereços dos atalhos precisam começar com https://');
-        await acao('conteudo_salvar', { chave: k, valor });
-        D.conteudo[k] = valor;
-        toast('Conteúdo salvo.');
+        await salvar(valor, form);
       },
-      { wide: true, setup: form => {
+      Object.assign({ wide: true, setup: form => {
         const box = form.querySelector('.ed-list');
         const desenhar = () => { box.innerHTML = linhas(); };
         desenhar();
@@ -1378,12 +1648,13 @@
           else { const j = i + Number(b.dataset.mv); if (j >= 0 && j < lista.length) [lista[i], lista[j]] = [lista[j], lista[i]]; }
           desenhar();
         });
-      } });
+      } }, apagar ? { onDelete: apagar, delLabel: 'Apagar fluxograma', confirmDel: 'Apagar este fluxograma inteiro?' } : {}));
   }
+
 
   /* ---------------- EQUIPE ---------------- */
   function equipe() {
-    const gere = AREA === 'admin' && can('gerenciar_equipe');
+    const gere = can('gerenciar_equipe');
     const nomesPerm = Object.fromEntries((D.permissoes || []).map(p => [p.k, p.t]));
     const grupos = {};
     [...D.membros].sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome)).forEach(m => { const g = FUNCOES.includes(m.funcao) ? m.funcao : 'Gestão'; (grupos[g] = grupos[g] || []).push(m); });
@@ -1419,20 +1690,28 @@
         <label>${m.id ? 'Nova senha <span class="hint">(vazio = manter)</span>' : 'Senha inicial <span class="hint">(mín. 6)</span>'}<input type="text" name="senha" autocomplete="off" ${m.id ? '' : 'required minlength="6"'}></label>
         <label>Ordem na lista<input type="number" name="ordem" value="${esc(m.ordem ?? 0)}"></label>
       </div>
-      <div><div class="lbl">Permissões ${m.dono ? '<span class="hint">(dono tem acesso total)</span>' : ''}</div><div class="perm-list">${lista}</div></div>`,
+      <div><div class="lbl">Permissões ${m.dono ? '<span class="hint">(dono tem acesso total)</span>' : ''}</div>
+        ${m.dono ? '' : `<div class="filters tight"><button type="button" class="btn btn-sm" data-adm>${ic('key', 14)}<span>Tornar administrador</span></button><button type="button" class="btn btn-sm btn-ghost" data-colab>Só colaborador</button></div>`}
+        <div class="perm-list">${lista}</div></div>`,
     async (f, form) => {
       const permissoes = [...form.querySelectorAll('input[name=perm]:checked:not(:disabled)')].map(c => c.value);
       const row = { id: f.id, nome: f.nome, funcao: f.funcao, usuario: f.usuario, email: f.email, ordem: f.ordem, permissoes: m.dono ? (m.permissoes || []) : permissoes };
+      if (row.id && row.id === D.me.id && !m.dono && !permissoes.includes('gerenciar_equipe')) throw new Error('Você não pode tirar de si mesmo a permissão de gerenciar a equipe.');
       const j = await acao('membro_salvar', { row, senha: f.senha });
       aplicar('membros', j.row);
       toast('Membro salvo.');
     },
-    m.id && !m.dono && m.id !== D.me.id ? { onDelete: async () => { await acao('membro_excluir', { id: m.id }); aplicar('membros', m, true); toast('Membro removido.'); }, delLabel: 'Remover', confirmDel: `Remover ${m.nome}? O login dele(a) deixa de funcionar na hora.` } : {});
+    Object.assign({ setup: form => {
+      const a = form.querySelector('[data-adm]'), c = form.querySelector('[data-colab]');
+      // Administrador = todas as permissões de gestão; só o dono decide quem gerencia a equipe e acessos
+      if (a) a.addEventListener('click', () => form.querySelectorAll('input[name=perm]').forEach(i => { i.checked = i.value !== 'gerenciar_equipe' || i.checked; }));
+      if (c) c.addEventListener('click', () => form.querySelectorAll('input[name=perm]').forEach(i => { i.checked = false; }));
+    } }, m.id && !m.dono && m.id !== D.me.id ? { onDelete: async () => { await acao('membro_excluir', { id: m.id }); aplicar('membros', m, true); toast('Membro removido.'); }, delLabel: 'Remover', confirmDel: `Remover ${m.nome}? O login e a senha deixam de funcionar na hora, mesmo se a pessoa estiver com o painel aberto.` } : {}));
   }
 
   /* ---------------- DESEMPENHO (gestão) ---------------- */
   function desempenho() {
-    if (!(AREA === 'admin' && can('gerenciar_tarefas'))) return inicio();
+    if (!can('gerenciar_tarefas')) return inicio();
     const dias = Number(S.periodo) || 30;
     const desde = Date.now() - dias * 864e5;
     const doPeriodo = t => new Date(t.criado_em).getTime() >= desde || (t.concluido_em && new Date(t.concluido_em).getTime() >= desde);
@@ -1491,6 +1770,113 @@
     } });
   }
 
+  /* ---------------- TUTORIAL DO PRIMEIRO ACESSO ---------------- */
+  // Ao mudar algo grande no painel: suba VERSAO_TUTORIAL e descreva a mudança em NOVIDADES[nova versão].
+  // Quem já fez o tutorial vê só as novidades; quem nunca entrou faz o tutorial completo.
+  const VERSAO_TUTORIAL = 1;
+  const NOVIDADES = {
+    // 2: ['Exemplo: nova aba de relatórios no menu.', 'Exemplo: agora dá para anexar imagens nas tarefas.']
+  };
+  function mostrarNovidades(desde) {
+    const itens = Object.keys(NOVIDADES).map(Number).filter(v => v > desde && v <= VERSAO_TUTORIAL).sort().flatMap(v => NOVIDADES[v]);
+    const concluir = () => acao('tutorial_visto', { versao: VERSAO_TUTORIAL }).then(() => { D.me.tutorial_versao = VERSAO_TUTORIAL; }).catch(() => {});
+    if (!itens.length) return concluir();
+    modal('O que mudou no painel ✨', `<ul class="novidades">${itens.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`, null, {
+      semFoco: true, onClose: concluir,
+      extra: `<button type="button" class="btn btn-ghost" data-tour>${ic('help', 14)}<span>Ver tutorial completo</span></button>`,
+      setup: (form, { fechar }) => form.querySelector('[data-tour]').addEventListener('click', () => { fechar(); iniciarTutorial(); })
+    });
+  }
+
+  function passosTutorial() {
+    const P = [];
+    const nome = primeiroNome(D.me.nome);
+    const mobile = matchMedia('(max-width: 820px)').matches;
+    P.push({ rota: 'inicio', titulo: `Bem-vinda(o) ao painel, ${nome}! 👋`, texto: 'Este é o lugar onde a equipe da Studio Pulga organiza tarefas, prazos, clientes e recados. Em 2 minutos você vai ver onde fica cada coisa. Use “OK, próximo” para avançar — e pode rever este tutorial quando quiser em Minha conta.' });
+    P.push({ rota: 'inicio', alvo: '#side', menu: true, titulo: 'Menu', texto: 'Tudo fica aqui: Início, Tarefas, Calendário, Publicações, Clientes e os conteúdos da agência (Fluxograma, Processos, Planos e Boas práticas).' + (mobile ? ' No celular, ele abre pelo botão ☰ no canto de cima.' : '') });
+    if (!mobile) P.push({ rota: 'inicio', alvo: '.side-toggle', titulo: 'Recolher o menu', texto: 'Clique aqui para deixar o menu só com ícones e ganhar espaço na tela. Clique de novo para expandir.' });
+    P.push({ rota: 'inicio', alvo: '#inboxBtn', titulo: 'Caixa de entrada', texto: 'Quando alguém criar uma tarefa para você, mandar um recado ou uma solicitação, chega aqui — com um número vermelho e um som. Abra para ver e responder.' });
+    P.push({ rota: 'inicio', alvo: '.with-panel > .panel', titulo: 'Suas pendências', texto: 'O que está atrasado (bolinha vermelha) e o que vence em até 2 dias (bolinha amarela). Bolinha verde = no prazo. Clique em qualquer item para abrir.' });
+    P.push({ rota: 'inicio', alvo: '.recados, .stats', titulo: 'Recados e resumo', texto: 'Recados e solicitações da gestão aparecem em destaque no topo do Início até você marcar como lido ou atendido. Logo abaixo, o resumo das suas tarefas.' });
+    P.push({ rota: 'inicio', alvo: '.strip', titulo: 'Minha semana', texto: 'Cada dia da semana com as bolinhas das suas tarefas. Toque em um dia para abrir as tarefas.' });
+    if (gestao()) P.push({ rota: 'inicio', alvo: '[data-act=recadoNovo]', titulo: 'Enviar recado', texto: 'Mande um recado rápido para uma pessoa ou para uma função inteira. Marque “urgente” para aparecer em vermelho. Você acompanha quem já leu.' });
+    P.push({ rota: 'tarefas', alvo: '.tweek, .cols', titulo: 'Tarefas da semana', texto: 'Cada coluna é um dia, pelo prazo. Toque numa tarefa para ver os detalhes, começar e concluir. O ✓ na tarefa conclui direto — e quem pediu é avisado na hora.' });
+    P.push({ rota: 'tarefas', alvo: '.weekbar', titulo: 'Semana a semana', texto: 'Use as setas para ver a semana passada ou as próximas. “Hoje” volta para a semana atual.' });
+    P.push({ rota: 'tarefas', alvo: '#view [data-act=tarefaNova]', titulo: 'Nova tarefa', texto: gestao() ? 'Crie e atribua tarefas: escolha a função (Social media, Video maker ou Design) e a pessoa, o prazo e quem recebe avisos por e-mail.' : 'Crie tarefas para você mesma(o) e organize sua semana. As tarefas que a gestão cria para você chegam sozinhas, marcadas como “Nova”.' });
+    P.push({ rota: 'calendario', alvo: '.cal', titulo: 'Calendário', texto: 'O mês inteiro: reuniões, entregas, prazos de tarefas e publicações. Toque em um dia para ver tudo o que tem nele.' });
+    P.push({ rota: 'calendario', alvo: '[data-act=adicionarDia]', titulo: 'Adicionar neste dia', texto: gestao() ? 'Escolha o dia e adicione uma tarefa para alguém (o prazo já vem preenchido) ou uma reunião, entrega ou prazo para a equipe.' : 'Escolha o dia e crie uma tarefa para você com aquele prazo.' });
+    P.push({ rota: 'clientes', alvo: '#view .ph', titulo: 'Clientes', texto: 'A ficha de cada cliente tem abas: visão geral (com links úteis), identidade visual (cores, música e tipografias), onboarding e formulário em PDF, observações da semana e tarefas.' });
+    P.push({ rota: 'fluxograma', alvo: '#view .ph', titulo: 'Fluxograma', texto: 'Como o trabalho anda, etapa por etapa, e quem executa cada uma. As etapas da sua função aparecem destacadas.' });
+    P.push({ rota: 'processos', alvo: '#view .items', titulo: 'Checklist de qualidade', texto: 'Antes de enviar uma peça, confira item por item e vá ticando. O checklist fica salvo só para você e dá para recomeçar.' });
+    if (gestao()) P.push({ rota: 'solicitacoes', alvo: '#view .ph', titulo: 'Solicitações de atendimento', texto: 'Peça algo para alguém da equipe com prazo (em 1 hora, até o fim do dia…). A pessoa recebe com som, fica fixo no Início dela e você vê quando foi vista e atendida — e em quanto tempo.' });
+    if (can('gerenciar_equipe')) P.push({ rota: 'equipe', alvo: '#view .ph', titulo: 'Equipe e acessos', texto: 'Cadastre e remova pessoas, crie logins e senhas, e defina quem é administrador. Remover alguém derruba o login na hora.' });
+    if (can('gerenciar_tarefas')) P.push({ rota: 'desempenho', alvo: '#view .stats', titulo: 'Desempenho', texto: 'Quanto cada pessoa concluiu, se foi no prazo, quanto tempo levou e quais erros foram registrados.' });
+    if (D.me.dono) P.push({ rota: 'acessos', alvo: '#view .ph', titulo: 'Acessos (só você vê)', texto: 'Quando e por quanto tempo cada pessoa usou o painel, e em qual aparelho.' });
+    P.push({ rota: 'inicio', alvo: '#senhaBtn', titulo: 'Minha conta', texto: 'Coloque seu e-mail para receber avisos, troque sua senha, ligue ou desligue o som das notificações e reveja este tutorial.' });
+    P.push({ rota: 'inicio', alvo: '#themeBtn', titulo: 'Tema claro ou escuro', texto: 'Troque entre o tema claro e o escuro quando quiser.' });
+    P.push({ rota: 'inicio', titulo: 'Pronto! 🎉', texto: (mobile ? 'Dica: instale o painel como app — no iPhone, toque em Compartilhar → “Adicionar à Tela de Início”; no Android, use “Instalar app” no menu. ' : '') + 'Qualquer dúvida, fale com a gestão. Bom trabalho!' });
+    return P;
+  }
+
+  function iniciarTutorial() {
+    document.querySelectorAll('.tour').forEach(t => t.remove());
+    const passos = passosTutorial();
+    let i = 0;
+    const tour = document.createElement('div');
+    tour.className = 'tour';
+    tour.innerHTML = '<div class="tour-hole"></div><div class="tour-card" role="dialog" aria-live="polite"></div>';
+    document.body.appendChild(tour);
+    const hole = tour.querySelector('.tour-hole'), card = tour.querySelector('.tour-card');
+    const fim = () => {
+      tour.remove(); document.body.classList.remove('nav-open'); removeEventListener('resize', posicionar);
+      D.me.tutorial_versao = VERSAO_TUTORIAL;
+      acao('tutorial_visto', { versao: VERSAO_TUTORIAL }).catch(() => {});
+      location.hash = '#/inicio';
+    };
+    let alvoAtual = null;
+    function posicionar() {
+      const r = alvoAtual && alvoAtual.getBoundingClientRect();
+      const mobile = innerWidth <= 820;
+      if (!r || !r.width) {
+        hole.style.cssText = `left:50%;top:50%;width:0;height:0`;
+        card.style.cssText = mobile ? '' : `left:50%;top:50%;transform:translate(-50%,-50%)`;
+        card.classList.add('centro');
+        return;
+      }
+      card.classList.remove('centro');
+      const m = 6;
+      hole.style.cssText = `left:${r.left - m}px;top:${r.top - m}px;width:${r.width + m * 2}px;height:${Math.min(r.height, innerHeight - 40) + m * 2}px`;
+      if (mobile) { card.style.cssText = r.top > innerHeight / 2 ? 'top:12px;bottom:auto' : ''; return; }
+      const cw = 360, ch = card.offsetHeight || 200;
+      let left = Math.min(Math.max(12, r.left), innerWidth - cw - 12);
+      let top = r.bottom + 14;
+      if (top + ch > innerHeight - 12) top = r.top - ch - 14;
+      if (top < 12) { top = Math.max(12, Math.min(innerHeight - ch - 12, r.top)); left = r.right + 14 + cw < innerWidth ? r.right + 14 : Math.max(12, r.left - cw - 14); }
+      card.style.cssText = `left:${left}px;top:${top}px`;
+    }
+    async function mostrar() {
+      const p = passos[i];
+      if (p.rota && rota()[0] !== p.rota) { location.hash = '#/' + p.rota; await new Promise(r => setTimeout(r, 260)); }
+      const mobile = innerWidth <= 820;
+      document.body.classList.toggle('nav-open', !!(p.menu && mobile));
+      if (p.menu && mobile) await new Promise(r => setTimeout(r, 230));
+      alvoAtual = null;
+      if (p.alvo) for (const sel of p.alvo.split(',')) { const el = document.querySelector(sel.trim()); if (el && el.getBoundingClientRect().width) { alvoAtual = el; break; } }
+      if (alvoAtual && !p.menu) { alvoAtual.scrollIntoView({ block: 'center', behavior: 'instant' }); await new Promise(r => setTimeout(r, 60)); }
+      card.innerHTML = `<div class="tour-n">${i + 1} de ${passos.length}</div><h3>${esc(p.titulo)}</h3><p>${esc(p.texto)}</p>
+        <div class="tour-b"><button type="button" class="btn btn-ghost btn-sm" data-pular>Pular tutorial</button><span></span>
+        ${i ? '<button type="button" class="btn btn-ghost btn-sm" data-voltar>Voltar</button>' : ''}
+        <button type="button" class="btn btn-primary btn-sm" data-ok>${i === passos.length - 1 ? 'Começar a usar' : 'OK, próximo'}</button></div>`;
+      card.querySelector('[data-ok]').addEventListener('click', () => { if (i === passos.length - 1) fim(); else { i++; mostrar(); } });
+      const v = card.querySelector('[data-voltar]'); if (v) v.addEventListener('click', () => { i--; mostrar(); });
+      card.querySelector('[data-pular]').addEventListener('click', () => { if (confirm('Pular o tutorial? Dá para ver de novo em Minha conta.')) fim(); });
+      posicionar();
+      card.querySelector('[data-ok]').focus();
+    }
+    addEventListener('resize', posicionar);
+    mostrar();
+  }
+
   /* ---------------- ações dos botões ---------------- */
   const ACOES = {
     tarefaNova: () => formTarefa(),
@@ -1513,6 +1899,10 @@
     eventoAbrir: id => abrirEvento((D.eventos || []).find(e => e.id === id)),
     pubNova: () => formPub(),
     pubAbrir: id => formPub(D.publicacoes.find(p => p.id === id)),
+    solicitacaoNova: () => formSolicitacao(),
+    acessosAtualizar: () => { acessosCache = null; render(true); },
+    acessoDetalhe: id => detalheAcesso(id),
+    atenderSolic: id => { const a = meusAvisos().find(x => x.id === id); if (a) atenderSolicitacao(a); },
     clienteNovo: () => formCliente(),
     clienteEditar: id => formCliente(cliente(id)),
     pdfAbrir: id => abrirPdf(id),
@@ -1526,8 +1916,10 @@
       try { await acao('nota_excluir', { id }); D.notas = D.notas.filter(n => n.id !== id); render(true); }
       catch (e) { if (e.message !== 'sessao') toast(e.message); }
     },
+    qaLimpar: () => { try { localStorage.removeItem(qaChave()); } catch {} render(true); },
     copiar: async cor => { try { await navigator.clipboard.writeText(cor); toast(`${cor} copiado`); } catch { toast(cor); } },
     editarBloco: k => editarBloco(k),
+    fluxoEditar: i => editarFluxoExtra(i),
     membroNovo: () => formMembro(),
     membroEditar: id => formMembro(membro(id))
   };
