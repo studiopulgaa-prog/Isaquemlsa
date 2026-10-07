@@ -14,6 +14,13 @@ const PARTE_MAX = 2 * 1024 * 1024 * 4 / 3 + 8; // ~2 MB por parte (em base64)
 const ARQUIVO_MAX = 25 * 1024 * 1024;
 const slugify = s => str(s, 80).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'cliente';
 
+const emailsLista = v => [...new Set((Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/)).map(email).filter(Boolean))].slice(0, 10);
+const dataBr = d => (d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '');
+
+// Aviso na caixa de entrada do site e e-mail na fila: falhas aqui nunca impedem a ação principal
+async function avisar(row) { try { await rpc('upsert', { tabela: 'eq_avisos', row }); } catch (e) {} }
+async function enfileirar(m) { try { await rpc('email_enfileirar', m); } catch (e) {} }
+
 class Negado extends Error {}
 const exigir = (ok, msg = 'Você não tem permissão para isso.') => { if (!ok) throw new Negado(msg); };
 
@@ -38,6 +45,16 @@ module.exports = async (req, res) => {
         if (status !== 'pendente' && !t.iniciado_em) row.iniciado_em = agora;
         if (status === 'pendente') row.iniciado_em = null;
         out.row = await rpc('upsert', { tabela: 'eq_tarefas', row });
+        // Concluída: avisa quem criou/atribuiu (no site e por e-mail)
+        if (status === 'feito' && t.status !== 'feito' && t.criado_por && t.criado_por !== me.id) {
+          await avisar({ membro_id: t.criado_por, de_id: me.id, tipo: 'concluida', titulo: t.titulo, texto: `${me.nome} concluiu esta tarefa.`, tarefa_id: t.id });
+          const criador = await rpc('get', { tabela: 'eq_membros', id: t.criado_por }).catch(() => null);
+          const destinos = criador && criador.email ? [criador.email] : (t.notificar ? t.emails || [] : []);
+          for (const e of destinos) {
+            await enfileirar({ chave: `concluida:${t.id}:${e}`, para: e, tipo: 'concluida', tarefa_id: t.id,
+              assunto: `Tarefa concluída: ${t.titulo}`, corpo: `${me.nome} marcou como feita a tarefa "${t.titulo}".` });
+          }
+        }
         break;
       }
       case 'tarefa_salvar': {
@@ -54,12 +71,15 @@ module.exports = async (req, res) => {
         const row = {
           membro_id: uuid(r.membro_id), titulo: str(r.titulo, 200), descricao: str(r.descricao),
           prioridade: um(r.prioridade, ['alta', 'media', 'baixa'], 'media'), prazo: data(r.prazo),
-          status: um(r.status, ['pendente', 'fazendo', 'feito'], 'pendente'), cliente_id: uuid(r.cliente_id)
+          status: um(r.status, ['pendente', 'fazendo', 'feito'], 'pendente'), cliente_id: uuid(r.cliente_id),
+          notificar: !!r.notificar, emails: emailsLista(r.emails)
         };
         exigir(row.titulo && row.membro_id, 'Preencha o título e o responsável.');
+        exigir(!row.notificar || row.emails.length, 'Adicione pelo menos um e-mail para receber os avisos.');
+        let atual = null;
         if (uuid(r.id)) {
           row.id = r.id;
-          const atual = await rpc('get', { tabela: 'eq_tarefas', id: r.id });
+          atual = await rpc('get', { tabela: 'eq_tarefas', id: r.id });
           exigir(atual, 'Tarefa não encontrada.');
           if (atual.status !== row.status) {
             const agora = new Date().toISOString();
@@ -72,6 +92,23 @@ module.exports = async (req, res) => {
           if (row.status !== 'pendente') row.iniciado_em = new Date().toISOString();
         }
         out.row = await rpc('upsert', { tabela: 'eq_tarefas', row });
+        const t = out.row;
+        // E-mails digitados ficam guardados para as próximas vezes
+        for (const e of row.emails) await rpc('contato_add', { email: e, criado_por: me.id }).catch(() => null);
+        // Nova pendência na caixa de entrada de quem recebeu a tarefa
+        const novaPara = t.membro_id !== me.id && (!atual || atual.membro_id !== t.membro_id);
+        if (novaPara) {
+          await avisar({ membro_id: t.membro_id, de_id: me.id, tipo: 'nova_tarefa', titulo: t.titulo, tarefa_id: t.id,
+            texto: `${me.nome} criou uma tarefa para você${t.prazo ? ` com prazo em ${dataBr(t.prazo)}` : ''}.` });
+        }
+        if (t.notificar && (novaPara || !atual)) {
+          const resp = t.membro_id === me.id ? me : await rpc('get', { tabela: 'eq_membros', id: t.membro_id }).catch(() => null);
+          for (const e of t.emails) {
+            await enfileirar({ chave: `nova:${t.id}:${t.membro_id}:${e}`, para: e, tipo: 'nova_tarefa', tarefa_id: t.id,
+              assunto: `Nova tarefa: ${t.titulo}`,
+              corpo: `${me.nome} criou a tarefa "${t.titulo}" para ${resp ? resp.nome : 'a equipe'}${t.prazo ? `, com prazo em ${dataBr(t.prazo)}` : ''}.` });
+          }
+        }
         break;
       }
       case 'tarefa_excluir': {
@@ -90,6 +127,38 @@ module.exports = async (req, res) => {
         out.row = await rpc('upsert', { tabela: 'eq_tarefas', row: { id: t.id, erros } });
         break;
       }
+
+      // ---------- CAIXA DE ENTRADA E RECADOS ----------
+      case 'aviso_lido':
+        await rpc('avisos_lidos', { membro_id: me.id, id: uuid(b.id) || null });
+        break;
+      case 'recado_enviar': {
+        exigir(gestao, 'Só a gestão envia recados.');
+        const para = uuids(b.membros);
+        const texto = str(b.texto, 600);
+        exigir(para.length && texto, 'Escolha quem recebe e escreva o recado.');
+        out.rows = [];
+        for (const id of para) {
+          out.rows.push(await rpc('upsert', { tabela: 'eq_avisos', row: { membro_id: id, de_id: me.id, tipo: 'recado', titulo: `Recado de ${me.nome}`, texto, urgente: !!b.urgente } }));
+        }
+        break;
+      }
+      case 'recado_excluir': {
+        const a = await rpc('get', { tabela: 'eq_avisos', id: uuid(b.id) });
+        exigir(a && a.tipo === 'recado' && (a.de_id === me.id || P('gerenciar_equipe')));
+        await rpc('remover', { tabela: 'eq_avisos', id: a.id });
+        break;
+      }
+      case 'contato_salvar': {
+        const e = email(b.email);
+        exigir(e, 'E-mail inválido.');
+        out.row = await rpc('contato_add', { email: e, nome: str(b.nome, 120), criado_por: me.id });
+        break;
+      }
+      case 'contato_excluir':
+        exigir(gestao);
+        await rpc('remover', { tabela: 'eq_contatos', id: uuid(b.id) });
+        break;
 
       // ---------- CALENDÁRIO ----------
       case 'evento_salvar': {

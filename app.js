@@ -38,6 +38,9 @@
     check: '<path d="M20 6 9 17l-5-5"/>',
     phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
     note: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/>',
+    megaphone: '<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
     board: '<rect x="3" y="3" width="7" height="18" rx="1.5"/><rect x="14" y="3" width="7" height="11" rx="1.5"/>'
   };
   const ic = (n, s) => `<svg viewBox="0 0 24 24"${s ? ` width="${s}" height="${s}"` : ''} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -78,7 +81,9 @@
   const nomeCliente = id => (cliente(id) || {}).nome || '';
   const primeiroNome = n => String(n || '').split(' ')[0];
   const conteudo = k => (D.conteudo && Array.isArray(D.conteudo[k]) ? D.conteudo[k] : []);
-  const funcoes = () => [...new Set(D.membros.map(m => (m.funcao || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // A equipe tem só três funções; quem não tem função (gestão) não aparece nos filtros
+  const FUNCOES = ['Social media', 'Video maker', 'Design'];
+  const funcoes = () => FUNCOES;
   const porNome = (a, b) => a.nome.localeCompare(b.nome);
 
   function toast(msg) {
@@ -115,6 +120,53 @@
     if (remover) { if (i >= 0) arr.splice(i, 1); }
     else if (i >= 0) arr[i] = Object.assign({}, arr[i], row);
     else arr.push(row);
+  }
+
+  /* ---------------- caixa de entrada ---------------- */
+  const meusAvisos = () => (D.avisos || []).filter(a => a.membro_id === D.me.id);
+  const naoLidos = () => meusAvisos().filter(a => !a.lido_em);
+  const tarefaNova = t => naoLidos().some(a => a.tipo === 'nova_tarefa' && a.tarefa_id === t.id);
+  async function marcarLido(filtro) {
+    const alvo = naoLidos().filter(filtro);
+    if (!alvo.length) return;
+    const agora = new Date().toISOString();
+    alvo.forEach(a => { a.lido_em = agora; });
+    atualizarInbox();
+    try { for (const a of alvo) await acao('aviso_lido', { id: a.id }); } catch (e) {}
+  }
+  function atualizarInbox() {
+    const b = $('#inboxBtn');
+    if (!b) return;
+    const n = naoLidos().length;
+    b.innerHTML = ic('inbox') + (n ? `<b class="ibadge">${n > 9 ? '9+' : n}</b>` : '');
+    b.classList.toggle('tem', !!n);
+  }
+  const TIPO_AVISO = { nova_tarefa: ['Nova tarefa', 'task', 'info'], concluida: ['Concluída', 'check', 'ok'], recado: ['Recado', 'megaphone', 'warn'] };
+  function abrirInbox() {
+    const lista = meusAvisos().slice(0, 60);
+    const ov = modal('Caixa de entrada', lista.length ? `<div class="inbox">${lista.map(a => {
+      const t = TIPO_AVISO[a.tipo] || TIPO_AVISO.recado;
+      return `<button type="button" class="ib-item${a.lido_em ? '' : ' unread'}${a.urgente ? ' urg' : ''}" data-aviso="${a.id}">
+        <span class="ib-ic ${t[2]}">${ic(t[1], 16)}</span>
+        <span class="ib-b"><span class="ib-t"><b>${esc(a.tipo === 'recado' ? (a.urgente ? 'Recado urgente' : 'Recado') : t[0])}</b> · ${esc(a.de_id ? primeiroNome(nomeMembro(a.de_id)) : 'Sistema')} <small>${dataHoraBr(a.criado_em)}</small></span>
+        <span class="ib-s">${esc(a.tipo === 'recado' ? a.texto : a.titulo)}</span>${a.tipo !== 'recado' && a.texto ? `<span class="ib-x">${esc(a.texto)}</span>` : ''}</span>
+        ${a.lido_em ? '' : '<span class="ib-dot"></span>'}</button>`;
+    }).join('')}</div>` : '<div class="empty">Nada por aqui ainda. Quando alguém criar uma tarefa para você ou mandar um recado, chega aqui.</div>', null, {
+      semFoco: true,
+      extra: naoLidos().length ? '<button type="button" class="btn btn-ghost" data-todos>Marcar tudo como lido</button>' : '',
+      setup: (form, { fechar }) => {
+        form.querySelectorAll('[data-aviso]').forEach(el => el.addEventListener('click', () => {
+          const a = meusAvisos().find(x => x.id === el.dataset.aviso);
+          marcarLido(x => x.id === a.id || (a.tarefa_id && x.tarefa_id === a.tarefa_id));
+          fechar();
+          render(true);
+          if (a.tarefa_id) { const t = D.tarefas.find(x => x.id === a.tarefa_id); if (t) abrirTarefa(t); else toast('Esta tarefa não está mais disponível.'); }
+        }));
+        const bt = form.querySelector('[data-todos]');
+        if (bt) bt.addEventListener('click', () => { marcarLido(() => true); fechar(); render(true); });
+      }
+    });
+    return ov;
   }
 
   /* ---------------- situação (bolinhas) ---------------- */
@@ -197,12 +249,13 @@
     recarregando = (async () => {
       const { status, j } = await api('/api/dados?area=' + AREA);
       if (status === 401) return mostrarLogin('Sua sessão expirou. Entre de novo.');
-      if (j.ok) { D = j; if (!document.querySelector('.overlay')) render(true); }
+      if (j.ok) { const antes = D ? naoLidos().length : 0; D = j; atualizarInbox(); if (naoLidos().length > antes) toast('Chegou algo novo na sua caixa de entrada'); if (!document.querySelector('.overlay')) render(true); }
     })();
     try { await recarregando; } finally { recarregando = null; }
   }
   // Mantém os dados frescos quando a pessoa volta para a aba
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && D) recarregar(); });
+  setInterval(() => { if (D && document.visibilityState === 'visible' && !document.querySelector('.overlay')) recarregar(); }, 120000);
 
   /* ---------------- topo e menu ---------------- */
   function montarTopo() {
@@ -212,6 +265,13 @@
     $('#senhaBtn').setAttribute('aria-label', 'Minha conta');
     $('#logoutBtn').innerHTML = ic('logout');
     aplicarTema();
+    if (!$('#inboxBtn')) {
+      const ib = document.createElement('button');
+      ib.className = 'icon-btn inbox-btn'; ib.id = 'inboxBtn'; ib.title = 'Caixa de entrada'; ib.setAttribute('aria-label', 'Caixa de entrada');
+      ib.addEventListener('click', abrirInbox);
+      $('#themeBtn').before(ib);
+    }
+    atualizarInbox();
     $('#av').textContent = iniciais(D.me.nome);
     $('#who').textContent = primeiroNome(D.me.nome);
     $('#switch').innerHTML = AREA === 'admin'
@@ -423,7 +483,7 @@
   function chipTarefa(t, mostrarPessoa) {
     const sit = sitTarefa(t);
     return `<div class="tchip ${sit}${t.status === 'fazendo' ? ' doing' : ''}" data-act="tarefaAbrir" data-id="${t.id}" role="button" tabindex="0">
-      ${dot(sit)}<div class="tc-body"><div class="tc-t">${esc(t.titulo)}</div>
+      ${dot(sit)}<div class="tc-body"><div class="tc-t">${tarefaNova(t) ? '<span class="nova">Nova</span>' : ''}${esc(t.titulo)}</div>
       <div class="tc-m">${t.cliente_id && nomeCliente(t.cliente_id) ? esc(nomeCliente(t.cliente_id)) : ''}${mostrarPessoa ? `${t.cliente_id ? ' · ' : ''}${esc(primeiroNome(nomeMembro(t.membro_id)))}` : ''}${t.status === 'fazendo' ? `<span class="tag info">Fazendo</span>` : ''}</div></div>
       ${podeStatus(t) && t.status !== 'feito' ? `<button class="tc-ok" data-act="tarefaStatus" data-id="${t.id}" data-status="feito" title="Marcar como feita">${ic('check', 14)}</button>` : ''}
     </div>`;
@@ -434,7 +494,7 @@
     const sit = sitTarefa(t);
     const prox = PROX[t.status] || PROX.pendente;
     return `<div class="task ${sit}" data-act="tarefaAbrir" data-id="${t.id}" role="button" tabindex="0">
-      <div class="t">${dot(sit)}<span>${esc(t.titulo)}</span></div>
+      <div class="t">${dot(sit)}<span>${tarefaNova(t) ? '<span class="nova">Nova</span>' : ''}${esc(t.titulo)}</span></div>
       <div class="meta">
         <span class="tag ${p[1]}">${p[0]}</span>
         <span class="tag ${sit === 'atrasada' ? 'danger' : sit === 'perto' ? 'warn' : ''}">${t.prazo ? quando(t.prazo) : 'Sem prazo'}</span>
@@ -477,8 +537,11 @@
     const seg = segunda(0);
     const semana = [...Array(7)].map((_, i) => somaDias(seg, i));
     const cont = s => abertas.filter(t => sitTarefa(t) === s).length;
+    const podeRecado = AREA === 'admin' && can('acesso_gestao');
     return `<div class="with-panel"><div>` +
-      cab(`${saud}, ${primeiroNome(D.me.nome)}!`, `${esc(D.me.funcao || '')}${AREA === 'admin' ? ' · Painel de gestão' : ''}`, btn('tarefaNova', 'Nova tarefa', 'plus', 'btn-primary')) +
+      cab(`${saud}, ${primeiroNome(D.me.nome)}!`, [D.me.funcao, AREA === 'admin' ? 'Painel de gestão' : ''].filter(Boolean).map(esc).join(' · '),
+        (podeRecado ? btn('recadoNovo', 'Enviar recado', 'megaphone', 'btn-ghost') : '') + btn('tarefaNova', 'Nova tarefa', 'plus', 'btn-primary')) +
+      blocoRecados() + (podeRecado ? recadosEnviados() : '') +
       `<div class="stats">
         <a class="card stat" href="#/tarefas"><div class="n">${abertas.length}</div><div class="l">tarefas abertas</div></a>
         <a class="card stat" href="#/tarefas"><div class="n red-t">${cont('atrasada')}</div><div class="l">${dot('atrasada')}atrasadas</div></a>
@@ -502,6 +565,92 @@
       `<h2 class="sec">Rede Conceito ${ed ? btn('editarBloco', 'Editar', 'edit', 'btn-sm btn-ghost', 'redeConceito') : ''}</h2>` +
       (rede.length ? `<div class="items">${rede.map(itemHtml).join('')}</div>` : vazio('Sem texto cadastrado.')) +
       `</div>${painelAtencao(minhas, 'Minhas pendências')}</div>`;
+  }
+
+  // Recados da gestão para mim: ficam no topo até eu marcar como lido
+  function blocoRecados() {
+    const l = meusAvisos().filter(a => a.tipo === 'recado' && !a.lido_em);
+    if (!l.length) return '';
+    return `<div class="recados">${l.map(a => `<div class="recado${a.urgente ? ' urg' : ''}">
+      <div class="rc-ic">${ic('megaphone', 20)}</div>
+      <div class="rc-b"><div class="rc-h">${a.urgente ? '<span class="tag danger">Urgente</span>' : ''}<b>Recado de ${esc(primeiroNome(nomeMembro(a.de_id)))}</b><small>${dataHoraBr(a.criado_em)}</small></div>
+      <div class="rc-t">${esc(a.texto)}</div></div>
+      <button class="btn btn-sm" data-act="recadoLido" data-id="${a.id}">${ic('check', 14)}<span>Li</span></button></div>`).join('')}</div>`;
+  }
+  function recadosEnviados() {
+    const l = (D.avisos || []).filter(a => a.tipo === 'recado' && a.de_id === D.me.id).slice(0, 8);
+    if (!l.length) return '';
+    return `<details class="enviados"><summary>${ic('megaphone', 14)}Recados que enviei <span class="count">${l.length}</span></summary>
+      ${l.map(a => `<div class="env"><span class="env-p">${esc(primeiroNome(nomeMembro(a.membro_id)))}</span><span class="env-t">${esc(a.texto)}</span>
+        <span class="env-s ${a.lido_em ? 'green-t' : 'muted'}">${a.lido_em ? '✓ lido ' + dataHoraBr(a.lido_em) : 'não lido'}</span>
+        <button class="icon-btn sm" data-act="recadoExcluir" data-id="${a.id}" title="Apagar">${ic('trash', 14)}</button></div>`).join('')}</details>`;
+  }
+  function formRecado() {
+    const lista = [...D.membros].filter(m => m.id !== D.me.id).sort(porNome);
+    modal('Enviar recado', `
+      <div><div class="lbl">Para quem</div>
+        <div class="filters tight"><select data-fpart aria-label="Filtrar por função">${optAreas('')}</select>
+          <button type="button" class="btn btn-sm btn-ghost" data-todos>Marcar visíveis</button><button type="button" class="btn btn-sm btn-ghost" data-nenhum>Limpar</button></div>
+        <div class="people">${lista.map(m => `<label data-funcao="${esc(m.funcao || '')}"><input type="checkbox" name="part" value="${m.id}" data-multi="1"><span class="avatar xs">${esc(iniciais(m.nome))}</span><span>${esc(m.nome)}<small>${esc(m.funcao || 'Gestão')}</small></span></label>`).join('')}</div>
+      </div>
+      <label>Recado<textarea name="texto" maxlength="600" required placeholder="Ex.: Prioridade hoje é finalizar o carrossel da Padaria."></textarea></label>
+      <label class="inline"><input type="checkbox" name="urgente"> Urgente (aparece em vermelho no início da pessoa)</label>`,
+    async (f, form) => {
+      const membros = [...form.querySelectorAll('input[name=part]:checked')].map(c => c.value);
+      if (!membros.length) throw new Error('Escolha pelo menos uma pessoa.');
+      const j = await acao('recado_enviar', { membros, texto: f.texto, urgente: f.urgente });
+      D.avisos = (j.rows || []).concat(D.avisos || []);
+      toast(membros.length === 1 ? 'Recado enviado.' : `Recado enviado para ${membros.length} pessoas.`);
+    }, { saveLabel: 'Enviar', setup: ligarPessoas });
+  }
+  // Filtro por função + marcar/limpar nas listas de pessoas com checkbox
+  function ligarPessoas(form) {
+    const fil = form.querySelector('[data-fpart]');
+    if (!fil) return;
+    const visiveis = () => [...form.querySelectorAll('.people label')].filter(l => l.style.display !== 'none');
+    fil.addEventListener('change', () => form.querySelectorAll('.people label').forEach(l => { l.style.display = !fil.value || l.dataset.funcao === fil.value ? '' : 'none'; }));
+    form.querySelector('[data-todos]').addEventListener('click', () => visiveis().forEach(l => { l.querySelector('input').checked = true; }));
+    form.querySelector('[data-nenhum]').addEventListener('click', () => form.querySelectorAll('.people input').forEach(i => { i.checked = false; }));
+  }
+
+  /* ---------------- e-mails de aviso ---------------- */
+  const emailsConhecidos = () => [...new Set([...(D.contatos || []).map(c => c.email), ...D.membros.map(m => m.email).filter(Boolean), D.me.email].filter(Boolean))].sort();
+  const validoEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+  function campoEmails(t) {
+    return `<div class="sep">Avisos por e-mail</div>
+      <label class="inline"><input type="checkbox" name="notificar"${t.notificar ? ' checked' : ''}> Enviar e-mails desta tarefa (nova tarefa, prazo chegando e atraso)</label>
+      <div class="emails" data-emails>
+        <div class="chips" data-chips></div>
+        <div class="em-add"><input type="text" data-em-in list="emailsConhecidos" placeholder="Escolha ou escreva um e-mail" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="email"><button type="button" class="btn btn-sm" data-em-add>${ic('plus', 14)}<span>Adicionar e-mail</span></button></div>
+        <datalist id="emailsConhecidos">${emailsConhecidos().map(e => `<option value="${esc(e)}">`).join('')}</datalist>
+        <div class="hint">O e-mail fica guardado nos registros para as próximas tarefas. O envio começa quando o serviço de e-mail for ligado.</div>
+      </div>`;
+  }
+  function ligarEmails(form, inicial, respSel) {
+    const lista = [...(inicial || [])];
+    const box = form.querySelector('[data-chips]'), inp = form.querySelector('[data-em-in]'), chk = form.querySelector('[name=notificar]');
+    const desenhar = () => {
+      box.innerHTML = lista.map((e, i) => `<span class="chip">${ic('mail', 12)}${esc(e)}<button type="button" data-rm="${i}" aria-label="Remover">×</button></span>`).join('') || '<span class="small muted">Nenhum e-mail ainda.</span>';
+    };
+    const add = async e => {
+      e = String(e || '').trim().toLowerCase();
+      if (!e) return;
+      if (!validoEmail(e)) { toast('E-mail inválido.'); return; }
+      if (!lista.includes(e)) lista.push(e);
+      inp.value = ''; chk.checked = true; desenhar();
+      if (!emailsConhecidos().includes(e)) {
+        try { const j = await acao('contato_salvar', { email: e }); D.contatos = (D.contatos || []).concat(j.row); } catch (er) {}
+      }
+    };
+    form.querySelector('[data-em-add]').addEventListener('click', () => add(inp.value));
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(inp.value); } });
+    box.addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (b) { lista.splice(+b.dataset.rm, 1); desenhar(); } });
+    // Ao escolher o responsável, sugere o e-mail dele
+    const sel = respSel && form.querySelector(respSel);
+    if (sel) sel.addEventListener('change', () => { const m = membro(sel.value); if (m && m.email && !lista.includes(m.email)) { lista.push(m.email); desenhar(); } });
+    desenhar();
+    // Se a pessoa digitou um e-mail válido e não clicou em "Adicionar", ele entra mesmo assim
+    return () => { const v = inp.value.trim().toLowerCase(); if (validoEmail(v) && !lista.includes(v)) lista.push(v); return lista.slice(); };
   }
 
   /* ---------------- TAREFAS ---------------- */
@@ -559,6 +708,7 @@
 
   function abrirTarefa(t) {
     if (!t) return;
+    if (tarefaNova(t)) { marcarLido(a => a.tarefa_id === t.id && a.tipo === 'nova_tarefa'); setTimeout(() => render(true), 0); }
     const sit = sitTarefa(t);
     const p = PRIOR[t.prioridade] || PRIOR.media;
     const prox = PROX[t.status] || PROX.pendente;
@@ -575,6 +725,7 @@
         <dt>Prazo</dt><dd>${t.prazo ? `${dataBr(t.prazo)} (${quando(t.prazo).toLowerCase()})` : 'Sem prazo'}</dd>
         ${t.cliente_id && nomeCliente(t.cliente_id) ? `<dt>Cliente</dt><dd><a href="#/cliente/${t.cliente_id}">${esc(nomeCliente(t.cliente_id))}</a></dd>` : ''}
         ${t.criado_por ? `<dt>Criada por</dt><dd>${esc(nomeMembro(t.criado_por))} · ${dataHoraBr(t.criado_em)}</dd>` : ''}
+        ${t.notificar && (t.emails || []).length ? `<dt>Avisos por e-mail</dt><dd>${t.emails.map(esc).join(', ')}</dd>` : ''}
         ${ini ? `<dt>Começou</dt><dd>${dataHoraBr(ini)}</dd>` : ''}
         ${fim ? `<dt>Concluiu</dt><dd>${dataHoraBr(fim)} · levou ${duracao(new Date(fim) - new Date(ini || t.criado_em))}</dd>` : ''}
       </dl>
@@ -615,6 +766,7 @@
     catch (e) { Object.assign(t, antes); render(true); if (e.message !== 'sessao') toast(e.message); }
   }
 
+  let lerEmails = () => [];
   function formTarefa(t = {}, padrao = {}) {
     const gere = edita('gerenciar_tarefas');
     const resp = t.membro_id || padrao.membro_id || (gere ? '' : D.me.id);
@@ -634,9 +786,21 @@
       <div class="two">
         <label>Prioridade<select name="prioridade">${opcoes([['alta', 'Alta'], ['media', 'Média'], ['baixa', 'Baixa']], t.prioridade || 'media')}</select></label>
         <label>Status<select name="status">${opcoes([['pendente', 'A fazer'], ['fazendo', 'Fazendo'], ['feito', 'Feito']], t.status || 'pendente')}</select></label>
-      </div>`,
-    async f => { delete f._area; const j = await acao('tarefa_salvar', { row: f }); aplicar('tarefas', j.row); toast('Tarefa salva.'); },
-    Object.assign({ setup: form => ligarArea(form, '[name=_area]', '[name=membro_id]') },
+      </div>
+      ${campoEmails(t)}`,
+    async f => {
+      delete f._area;
+      f.emails = lerEmails();
+      if (f.notificar && !f.emails.length) throw new Error('Adicione pelo menos um e-mail ou desmarque os avisos por e-mail.');
+      const j = await acao('tarefa_salvar', { row: f });
+      aplicar('tarefas', j.row);
+      toast(j.row.membro_id !== D.me.id && !t.id ? `Tarefa enviada para ${primeiroNome(nomeMembro(j.row.membro_id))}.` : 'Tarefa salva.');
+    },
+    Object.assign({ wide: true, setup: form => {
+      ligarArea(form, '[name=_area]', '[name=membro_id]');
+      const r = membro(resp);
+      lerEmails = ligarEmails(form, t.id ? t.emails : (r && r.email ? [r.email] : []), '[name=membro_id]');
+    } },
       t.id && podeEditarTarefa(t) ? { onDelete: async () => { await acao('tarefa_excluir', { id: t.id }); aplicar('tarefas', t, true); toast('Tarefa excluída.'); }, confirmDel: 'Excluir esta tarefa?' } : {}));
   }
 
@@ -670,10 +834,8 @@
     const celulas = [...Array(42)].map((_, i) => somaDias(ini, i));
     const ultimaLinha = celulas.slice(35).every(d => d.getMonth() !== mes) ? 35 : 42;
     const dSel = itensDoDia(S.diaSel);
-    const podeCriar = edita('gerenciar_calendario');
     const selD = parseYmd(S.diaSel);
-    return cab('Calendário', 'Reuniões, entregas, prazos, tarefas e publicações do mês.',
-      (podeCriar ? btn('eventoNovo', 'Novo evento', 'plus', 'btn-primary') : '')) +
+    return cab('Calendário', 'Reuniões, entregas, prazos, tarefas e publicações do mês. Escolha um dia e use “Adicionar neste dia”.') +
       filtrosTarefas() +
       `<div class="cal-wrap"><div class="cal">
         <div class="cal-head">${btn('mes', '', 'left', 'btn-ghost btn-sm', '-1', ' aria-label="Mês anterior"')}<b>${MESES[mes]} ${ano}</b>${btn('mes', '', 'right', 'btn-ghost btn-sm', '1', ' aria-label="Próximo mês"')}${S.mes ? btn('mes', 'Hoje', '', 'btn-ghost btn-sm', '0') : ''}</div>
@@ -692,7 +854,7 @@
       </div>
       <aside class="panel day-panel">
         <h3>${DIAS[selD.getDay()]}, ${selD.getDate()} de ${MESES[selD.getMonth()]}</h3>
-        ${podeCriar ? `<button class="btn btn-ghost btn-sm full" data-act="eventoNovo" data-id="${S.diaSel}">${ic('plus')}Adicionar neste dia</button>` : ''}
+        <button class="btn btn-primary btn-sm full" data-act="adicionarDia" data-id="${S.diaSel}">${ic('plus')}<span>Adicionar neste dia</span></button>
         ${dSel.ev.length ? `<div class="pl-sec"><div class="pl-h">${ic('month', 14)}Eventos</div>${dSel.ev.map(e => `<button class="pl" data-act="eventoAbrir" data-id="${e.id}">${dot(sitEvento(e))}<span class="pl-t">${TIPO_EV[e.tipo] ? TIPO_EV[e.tipo][0] : ''} ${esc(e.titulo)}</span><span class="pl-d">${esc(e.hora || '')}</span></button>`).join('')}</div>` : ''}
         ${dSel.ts.length ? `<div class="pl-sec"><div class="pl-h">${ic('task', 14)}Prazos de tarefas</div>${dSel.ts.map(t => `<button class="pl" data-act="tarefaAbrir" data-id="${t.id}">${dot(sitTarefa(t))}<span class="pl-t">${esc(t.titulo)}</span><span class="pl-d">${esc(primeiroNome(nomeMembro(t.membro_id)))}</span></button>`).join('')}</div>` : ''}
         ${dSel.ps.length ? `<div class="pl-sec"><div class="pl-h">${ic('cal', 14)}Publicações</div>${dSel.ps.map(p => `<button class="pl" data-act="pubAbrir" data-id="${p.id}"><span class="dot pub"></span><span class="pl-t">${esc(nomeCliente(p.cliente_id))} · ${esc(p.formato || '')}</span><span class="pl-d">${esc(p.hora || '')}</span></button>`).join('')}</div>` : ''}
@@ -754,15 +916,7 @@
       aplicar('eventos', j.row);
       S.diaSel = j.row.data;
       toast('Evento salvo.');
-    }, Object.assign({
-      setup: form => {
-        const fil = form.querySelector('[data-fpart]');
-        const visiveis = () => [...form.querySelectorAll('.people label')].filter(l => l.style.display !== 'none');
-        fil.addEventListener('change', () => form.querySelectorAll('.people label').forEach(l => { l.style.display = !fil.value || l.dataset.funcao === fil.value ? '' : 'none'; }));
-        form.querySelector('[data-todos]').addEventListener('click', () => visiveis().forEach(l => { l.querySelector('input').checked = true; }));
-        form.querySelector('[data-nenhum]').addEventListener('click', () => form.querySelectorAll('.people input').forEach(i => { i.checked = false; }));
-      }
-    }, e.id ? { onDelete: async () => { await acao('evento_excluir', { id: e.id }); aplicar('eventos', e, true); toast('Evento excluído.'); }, confirmDel: 'Excluir este evento?' } : {}));
+    }, Object.assign({ setup: ligarPessoas }, e.id ? { onDelete: async () => { await acao('evento_excluir', { id: e.id }); aplicar('eventos', e, true); toast('Evento excluído.'); }, confirmDel: 'Excluir este evento?' } : {}));
   }
 
   /* ---------------- PUBLICAÇÕES ---------------- */
@@ -1232,7 +1386,7 @@
     const gere = AREA === 'admin' && can('gerenciar_equipe');
     const nomesPerm = Object.fromEntries((D.permissoes || []).map(p => [p.k, p.t]));
     const grupos = {};
-    [...D.membros].sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome)).forEach(m => { (grupos[m.funcao || 'Sem função'] = grupos[m.funcao || 'Sem função'] || []).push(m); });
+    [...D.membros].sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome)).forEach(m => { const g = FUNCOES.includes(m.funcao) ? m.funcao : 'Gestão'; (grupos[g] = grupos[g] || []).push(m); });
     return cab(gere ? 'Equipe e acessos' : 'Equipe', gere ? 'Cadastre a equipe, crie logins e defina o que cada um pode fazer.' : 'Quem faz parte do Studio Pulga.',
       gere ? btn('membroNovo', 'Novo membro', 'plus', 'btn-primary') : '') +
       Object.entries(grupos).map(([g, l]) => `<h2 class="sec">${esc(g)} <span class="count">${l.length}</span></h2><div class="grid">${l.map(m => `<div class="card">
@@ -1255,7 +1409,7 @@
       <input type="hidden" name="id" value="${esc(m.id || '')}">
       <div class="two">
         <label>Nome<input name="nome" maxlength="120" required value="${esc(m.nome || '')}"></label>
-        <label>Função<input name="funcao" maxlength="120" value="${esc(m.funcao || '')}" list="funcoesM" placeholder="Social media, Video maker, Design…"><datalist id="funcoesM">${funcoes().map(f => `<option>${esc(f)}</option>`).join('')}</datalist></label>
+        <label>Função<select name="funcao">${opcoes([['', 'Sem função (gestão)'], ...FUNCOES.map(f => [f, f])], FUNCOES.includes(m.funcao) ? m.funcao : '')}</select></label>
       </div>
       <div class="two">
         <label>Usuário (login)<input name="usuario" maxlength="40" required autocapitalize="none" value="${esc(m.usuario || '')}"></label>
@@ -1323,6 +1477,20 @@
       `<p class="small muted" style="margin-top:1rem">Tempo de execução = de “Começar” até “Concluir” (ou da criação até a conclusão, se a pessoa não clicou em Começar). Registre erros abrindo a tarefa.</p>`;
   }
 
+  // "Adicionar neste dia": tarefa para alguém (ou para mim) ou reunião/entrega/prazo
+  function adicionarNoDia(dia) {
+    const tarefa = () => formTarefa({}, { prazo: dia });
+    if (!edita('gerenciar_calendario')) return tarefa();
+    const d = parseYmd(dia);
+    modal(`Adicionar em ${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]}`, `<div class="escolha">
+      <button type="button" class="esc" data-tipo="tarefa">${ic('task', 22)}<b>${edita('gerenciar_tarefas') ? 'Tarefa para alguém' : 'Tarefa para mim'}</b><span>Com responsável, prazo neste dia e avisos por e-mail</span></button>
+      <button type="button" class="esc" data-tipo="evento">${ic('month', 22)}<b>Reunião, entrega ou prazo</b><span>Evento no calendário com quem participa</span></button>
+    </div>`, null, { semFoco: true, setup: (form, { fechar }) => {
+      form.querySelector('[data-tipo=tarefa]').addEventListener('click', () => { fechar(); tarefa(); });
+      form.querySelector('[data-tipo=evento]').addEventListener('click', () => { fechar(); formEvento({}, dia); });
+    } });
+  }
+
   /* ---------------- ações dos botões ---------------- */
   const ACOES = {
     tarefaNova: () => formTarefa(),
@@ -1335,6 +1503,13 @@
     mes: n => { S.mes = n === '0' ? 0 : S.mes + Number(n); if (n === '0') S.diaSel = hoje(); render(true); },
     diaSel: d => { S.diaSel = d; render(true); },
     eventoNovo: dia => formEvento({}, dia || S.diaSel),
+    adicionarDia: dia => adicionarNoDia(dia || S.diaSel),
+    recadoNovo: () => formRecado(),
+    recadoLido: id => { marcarLido(a => a.id === id); render(true); toast('Recado marcado como lido.'); },
+    recadoExcluir: async id => {
+      if (!confirm('Apagar este recado?')) return;
+      try { await acao('recado_excluir', { id }); D.avisos = D.avisos.filter(a => a.id !== id); render(true); } catch (e) { if (e.message !== 'sessao') toast(e.message); }
+    },
     eventoAbrir: id => abrirEvento((D.eventos || []).find(e => e.id === id)),
     pubNova: () => formPub(),
     pubAbrir: id => formPub(D.publicacoes.find(p => p.id === id)),

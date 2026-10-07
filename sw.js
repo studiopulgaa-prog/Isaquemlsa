@@ -1,6 +1,6 @@
 // Service worker: abre o painel na hora (arquivos em cache) e nunca guarda dados da API
-const VERSAO = 'sp-v3';
-const ARQUIVOS = ['/', '/admin', '/app.js?v=3', '/app.css?v=3', '/manifest.webmanifest', '/icon-192.png'];
+const VERSAO = 'sp-v4';
+const ARQUIVOS = ['/', '/admin', '/app.js?v=4', '/app.css?v=4', '/manifest.webmanifest', '/icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSAO).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));

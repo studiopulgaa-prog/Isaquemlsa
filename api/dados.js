@@ -26,7 +26,9 @@ module.exports = async (req, res) => {
     const eventos = (d.eventos || []).filter(e => verTodas || pode(me, 'gerenciar_calendario') || !(e.participantes || []).length || e.participantes.includes(me.id));
     const membros = pode(me, 'gerenciar_equipe') && area === 'admin'
       ? d.membros
-      : d.membros.map(m => ({ id: m.id, nome: m.nome, funcao: m.funcao, ordem: m.ordem }));
+      : d.membros.map(m => Object.assign({ id: m.id, nome: m.nome, funcao: m.funcao, ordem: m.ordem }, pode(me, 'acesso_gestao') ? { email: m.email } : {}));
+    // Caixa de entrada: o que chegou para mim + recados que eu enviei (para ver se já leram)
+    const avisos = (d.avisos || []).filter(a => a.membro_id === me.id || (a.tipo === 'recado' && a.de_id === me.id));
 
     const perms = PERMISSOES.map(p => p.k).filter(k => pode(me, k));
     send(res, 200, {
@@ -34,7 +36,7 @@ module.exports = async (req, res) => {
       me: { id: me.id, nome: me.nome, funcao: me.funcao, usuario: me.usuario, email: me.email || '', dono: me.dono, perms },
       permissoes: area === 'admin' ? PERMISSOES : [],
       clientes: d.clientes, conteudo, tarefas, publicacoes: d.publicacoes, membros,
-      eventos, notas: d.notas || [], arquivos: d.arquivos || []
+      eventos, notas: d.notas || [], arquivos: d.arquivos || [], avisos, contatos: d.contatos || []
     });
   } catch (e) {
     send(res, 500, { ok: false, erro: 'Erro ao carregar. Tente de novo.' });
