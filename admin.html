@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Painel de Gestão · Studio Pulga</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@500;600;700;800&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css?v=2">
+</head>
+<body>
+<div id="login" class="hidden">
+  <form class="login-card" id="loginForm">
+    <div class="wordmark">studio <span>pulga</span></div>
+    <p>Painel de gestão — acesso da liderança</p>
+    <input class="field" id="usuario" type="text" placeholder="Usuário" autocomplete="username" autocapitalize="none" required>
+    <input class="field" id="senha" type="password" placeholder="Senha" autocomplete="current-password" required>
+    <button class="btn btn-primary" type="submit">Entrar</button>
+    <div class="err" id="err"></div>
+  </form>
+</div>
+<div id="app" class="hidden">
+  <header class="top">
+    <button class="icon-btn menu-btn" id="menuBtn" aria-label="Menu"></button>
+    <div class="brand"><a href="#/inicio" class="wordmark">studio <span>pulga</span></a></div>
+    <div class="mid"><span class="pill" id="pill">Painel de Gestão</span><span id="switch"></span></div>
+    <div class="right">
+      <button class="icon-btn" id="themeBtn" aria-label="Tema"></button>
+      <button class="icon-btn" id="senhaBtn" aria-label="Trocar senha" title="Trocar senha"></button>
+      <div class="avatar" id="av">SP</div>
+      <span class="who" id="who"></span>
+      <button class="icon-btn" id="logoutBtn" aria-label="Sair" title="Sair"></button>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="side" id="side"></nav>
+    <main id="view"></main>
+  </div>
+</div>
+<script>window.AREA="admin";</script>
+<script src="/app.js?v=2"></script>
+</body>
+</html>
