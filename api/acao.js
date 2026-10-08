@@ -417,11 +417,14 @@ module.exports = async (req, res) => {
       case 'anotacao_salvar': {
         const texto = str(b.texto, 4000);
         exigir(texto, 'Escreva a anotação.');
-        if (!uuid(b.id)) {
+        if (!uuid(b.id) && b.cliente_id) {
           const c = await rpc('get', { tabela: 'eq_clientes', id: uuid(b.cliente_id) });
           exigir(c && !c.removido, 'Cliente não encontrado.');
         }
-        out.row = await rpc('anotacao_salvar', { id: uuid(b.id), membro_id: me.id, cliente_id: uuid(b.cliente_id), texto });
+        // Anotação sem cliente = diário/relatório pessoal, sempre privado
+        const publica = uuid(b.cliente_id) || uuid(b.id) ? !!b.publica : false;
+        out.row = await rpc('anotacao_salvar', { id: uuid(b.id), membro_id: me.id, cliente_id: uuid(b.cliente_id), texto, publica });
+        if (out.row && !out.row.cliente_id) { out.row.publica = false; }
         exigir(out.row, 'Só quem escreveu pode editar esta anotação.');
         break;
       }
@@ -430,6 +433,23 @@ module.exports = async (req, res) => {
         exigir(r && r.ok, 'Só quem escreveu pode excluir esta anotação.');
         break;
       }
+      // ---------- COMUNICADO DE ABERTURA (bloqueia o painel até confirmar a leitura) ----------
+      case 'comunicado_enviar': {
+        exigir(gestao, 'Só a gestão envia comunicados.');
+        const titulo = str(b.titulo, 120), texto = str(b.texto, 3000);
+        exigir(titulo && texto, 'Preencha o título e a mensagem.');
+        out.row = await rpc('comunicado_salvar', { membro_id: me.id, titulo, texto, para: uuids(b.para) });
+        out.row.leituras = [];
+        break;
+      }
+      case 'comunicado_encerrar':
+        exigir(gestao);
+        await rpc('comunicado_encerrar', { id: uuid(b.id) });
+        break;
+      case 'comunicado_ler':
+        exigir(uuid(b.id), 'Comunicado inválido.');
+        await rpc('comunicado_ler', { id: b.id, membro_id: me.id });
+        break;
       case 'meu_email': {
         const e = email(b.email);
         exigir(e !== null, 'E-mail inválido.');

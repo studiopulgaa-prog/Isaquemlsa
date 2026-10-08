@@ -32,8 +32,13 @@ module.exports = async (req, res) => {
     const avisos = (d.avisos || []).filter(a => a.membro_id === me.id || (['recado', 'solicitacao'].includes(a.tipo) && a.de_id === me.id)
       || (a.tipo === 'solicitacao' && pode(me, 'acesso_gestao')));
 
-    // Anotações pessoais: cada um recebe só as suas; o dono recebe todas
-    const anotacoes = await rpc('anotacoes_listar', { membro_id: me.dono ? null : me.id });
+    // Anotações: as minhas + as que a autora deixou visíveis para a equipe; o dono recebe todas
+    const anotacoes = await rpc('anotacoes_listar', { membro_id: me.id, todas: !!me.dono });
+    // Comunicados: gestão vê todos com quem já leu; os demais recebem só os que ainda precisam ler
+    const coms = (await rpc('comunicados_listar', {})) || [];
+    const paraMim = c => !(c.para || []).length || c.para.includes(me.id);
+    const comunicados = pode(me, 'acesso_gestao') ? coms
+      : coms.filter(c => c.ativo && paraMim(c) && !(c.leituras || []).some(l => l.membro_id === me.id)).map(({ leituras, ...c }) => c);
 
     const perms = PERMISSOES.map(p => p.k).filter(k => pode(me, k));
     send(res, 200, {
@@ -41,7 +46,7 @@ module.exports = async (req, res) => {
       me: { id: me.id, nome: me.nome, funcao: me.funcao, usuario: me.usuario, email: me.email || '', dono: me.dono, perms, tutorial_versao: me.tutorial_versao || 0 },
       permissoes: pode(me, 'acesso_gestao') ? PERMISSOES : [],
       clientes: d.clientes, conteudo, tarefas, publicacoes: d.publicacoes, membros,
-      eventos, notas: d.notas || [], arquivos: d.arquivos || [], avisos, contatos: d.contatos || [], anotacoes: anotacoes || []
+      eventos, notas: d.notas || [], arquivos: d.arquivos || [], avisos, contatos: d.contatos || [], anotacoes: anotacoes || [], comunicados
     });
   } catch (e) {
     send(res, 500, { ok: false, erro: 'Erro ao carregar. Tente de novo.' });

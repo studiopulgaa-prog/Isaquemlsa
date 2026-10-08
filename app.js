@@ -266,6 +266,8 @@
     render();
     // Primeiro acesso: tutorial completo. Depois de uma atualização grande: só "o que mudou".
     const visto = Number(D.me.tutorial_versao) || 0;
+    mostrarComunicado();
+    ping(); // marca o ponto de partida (conteúdo/caixa de entrada) para detectar mudanças depois
     if (visto < 1) setTimeout(iniciarTutorial, 500);
     else if (visto < VERSAO_TUTORIAL) setTimeout(() => mostrarNovidades(visto), 500);
   }
@@ -278,7 +280,7 @@
       if (status === 401) return mostrarLogin('Sua sessão expirou. Entre de novo.');
       if (j.ok) {
         const antes = D ? naoLidos().map(a => a.id) : [];
-        D = j; atualizarInbox();
+        D = j; atualizarInbox(); mostrarComunicado();
         const novos = naoLidos().filter(a => !antes.includes(a.id));
         if (novos.length) {
           tocarAviso();
@@ -295,7 +297,7 @@
   // A cada 20s (com o painel visível): registra o tempo de uso e vê se chegou algo na caixa de entrada.
   // Só baixa tudo de novo quando há novidade — por isso o aviso chega em até ~20s sem pesar.
   const novaSessao = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
-  let sessao = novaSessao(), ultimoVisto = Date.now(), ultimoAviso = null;
+  let sessao = novaSessao(), ultimoVisto = Date.now(), ultimoAviso = null, ultimoConteudo = null;
   async function ping() {
     if (!D || document.visibilityState !== 'visible') return;
     if (Date.now() - ultimoVisto > 5 * 60e3) sessao = novaSessao(); // voltou depois de 5 min: conta como novo acesso
@@ -304,8 +306,10 @@
     const { status, j } = await api('/api/ping', { sessao, area: AREA, app });
     if (status === 401) return mostrarLogin('Sua sessão expirou. Entre de novo.');
     if (!j.ok) return;
-    if (j.nao_lidos !== naoLidos().length || (j.ultimo && ultimoAviso && j.ultimo > ultimoAviso)) recarregar();
+    const mudouConteudo = j.conteudo && ultimoConteudo && j.conteudo !== ultimoConteudo;
+    if (j.nao_lidos !== naoLidos().length || (j.ultimo && ultimoAviso && j.ultimo > ultimoAviso) || mudouConteudo || (j.comunicados && !comunicadoPendente())) recarregar();
     if (j.ultimo) ultimoAviso = j.ultimo;
+    if (j.conteudo) ultimoConteudo = j.conteudo;
   }
   setInterval(ping, 20000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ping(); });
@@ -364,7 +368,7 @@
     const atrasadas = minhas.filter(t => sitTarefa(t) === 'atrasada').length;
     const itens = [
       ['inicio', 'home', 'Início'],
-      ...(gestao() ? [['solicitacoes', 'hand', 'Solicitações de atendimento', solicPend()]] : []),
+      ...(gestao() ? [['solicitacoes', 'hand', 'Solicitações de atendimento', solicPend()], ['comunicados', 'megaphone', 'Comunicados']] : []),
       ['tarefas', 'task', 'Tarefas', atrasadas],
       ['calendario', 'month', 'Calendário'],
       ['agenda', 'cal', 'Publicações'],
@@ -374,6 +378,7 @@
       ['processos', 'process', 'Processos'],
       ['planos', 'plan', 'Planos'],
       ['praticas', 'star', 'Boas práticas'],
+      ['diario', 'note', 'Minhas anotações'],
       ['g', 'Pessoas'],
       ['equipe', 'team', can('gerenciar_equipe') ? 'Equipe e acessos' : 'Equipe']
     ];
@@ -524,7 +529,7 @@
     const [r, a1, a2] = rota();
     const v = $('#view');
     posRender = [];
-    const telas = { inicio, tarefas, calendario, agenda, clientes, cliente: () => fichaCliente(a1, a2), fluxograma, processos, planos, praticas, equipe, desempenho, solicitacoes, acessos };
+    const telas = { diario, comunicados, inicio, tarefas, calendario, agenda, clientes, cliente: () => fichaCliente(a1, a2), fluxograma, processos, planos, praticas, equipe, desempenho, solicitacoes, acessos };
     v.innerHTML = (telas[r] || inicio)();
     ligar(v);
     posRender.forEach(fn => fn(v));
@@ -1285,29 +1290,14 @@
       });
     } else if (aba === 'anotacoes') {
       const minhas = anots.filter(n => n.membro_id === D.me.id);
-      const outras = D.me.dono ? anots.filter(n => n.membro_id !== D.me.id) : [];
-      const cartao = (n, minha) => `<div class="item anot">
-        <div class="t"><span class="small muted">${minha ? 'Você' : esc(nomeMembro(n.membro_id))} · ${dataHoraBr(n.atualizado_em)}</span>
-        ${minha ? `<span class="acts-inline"><button class="icon-btn sm" data-act="anotEditar" data-id="${n.id}" title="Editar">${ic('edit', 14)}</button><button class="icon-btn sm" data-act="anotExcluir" data-id="${n.id}" title="Excluir">${ic('trash', 14)}</button></span>` : ''}</div>
-        <div class="d">${esc(n.texto)}</div></div>`;
-      corpo = `<div class="aviso-priv">${ic('lock', 14)}<span>${D.me.dono ? 'Suas anotações pessoais. Abaixo, você (dono) também vê as anotações de cada pessoa da equipe sobre este cliente.' : 'Suas anotações pessoais sobre este cliente. Ninguém da equipe vê — só você e a direção.'}</span></div>
-        <div class="card nota-nova"><form id="anotForm" class="form">
+      const outras = anots.filter(n => n.membro_id !== D.me.id);
+      corpo = `<div class="card nota-nova"><form id="anotForm" class="form">
           <textarea name="texto" maxlength="4000" required placeholder="Ex.: prefere ser chamada por áudio, gosta de referências minimalistas…"></textarea>
-          <div class="r"><button class="btn btn-primary" type="submit">${ic('note')}<span>Salvar anotação</span></button></div></form></div>` +
-        (minhas.length ? `<h2 class="sec">Minhas anotações <span class="count">${minhas.length}</span></h2><div class="items">${minhas.map(n => cartao(n, true)).join('')}</div>` : vazio('Você ainda não tem anotações sobre este cliente.')) +
-        (D.me.dono ? `<h2 class="sec">Anotações da equipe <span class="count">${outras.length}</span></h2>` + (outras.length ? `<div class="items">${outras.map(n => cartao(n, false)).join('')}</div>` : vazio('Ninguém da equipe fez anotações sobre este cliente.')) : '');
-      posRender.push(v => {
-        const f = v.querySelector('#anotForm');
-        if (f) f.addEventListener('submit', async e => {
-          e.preventDefault();
-          const b = f.querySelector('button'); b.disabled = true;
-          try {
-            const j = await acao('anotacao_salvar', { cliente_id: c.id, texto: f.texto.value });
-            D.anotacoes = [j.row].concat(D.anotacoes || []);
-            toast('Anotação salva.'); render(true);
-          } catch (er) { if (er.message !== 'sessao') toast(er.message); b.disabled = false; }
-        });
-      });
+          <div class="r spread"><label class="inline small"><input type="checkbox" name="publica"> Visível para toda a equipe</label>
+          <button class="btn btn-primary" type="submit">${ic('note')}<span>Salvar anotação</span></button></div></form></div>` +
+        (minhas.length ? `<h2 class="sec">Minhas anotações <span class="count">${minhas.length}</span></h2><div class="items">${minhas.map(cartaoAnot).join('')}</div>` : vazio('Você ainda não tem anotações sobre este cliente.')) +
+        (outras.length ? `<h2 class="sec">Anotações da equipe <span class="count">${outras.length}</span></h2><div class="items">${outras.map(cartaoAnot).join('')}</div>` : '');
+      posRender.push(v => ligarFormAnot(v, c.id));
     } else if (aba === 'tarefas') {
       const pubs = D.publicacoes.filter(p => p.cliente_id === c.id && p.data >= hoje()).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
       const evs = (D.eventos || []).filter(e => e.cliente_id === c.id && e.data >= hoje());
@@ -1321,6 +1311,104 @@
         (edita('editar_clientes') ? btn('clienteEditar', 'Editar ficha', 'edit', 'btn-primary', c.id) : '')) +
       `<nav class="tabs">${ABAS.map(([k, t]) => `<a href="#/cliente/${c.id}/${k}" class="${aba === k ? 'on' : ''}">${t}${cont[k] ? ` <span class="count">${cont[k]}</span>` : ''}</a>`).join('')}</nav>` + corpo;
   }
+  // Cartão de anotação (cliente ou diário). "Equipe" = todos veem; "Privada" = só a autora (na tela dela)
+  function cartaoAnot(n) {
+    const minha = n.membro_id === D.me.id;
+    return `<div class="item anot"><div class="t"><span class="small muted">${minha ? 'Você' : esc(nomeMembro(n.membro_id))} · ${dataHoraBr(n.atualizado_em)}</span>
+      ${n.cliente_id ? (n.publica ? '<span class="tag info">Equipe</span>' : '<span class="tag">Privada</span>') : ''}
+      ${minha ? `<span class="acts-inline"><button class="icon-btn sm" data-act="anotEditar" data-id="${n.id}" title="Editar">${ic('edit', 14)}</button><button class="icon-btn sm" data-act="anotExcluir" data-id="${n.id}" title="Excluir">${ic('trash', 14)}</button></span>` : ''}</div>
+      <div class="d">${esc(n.texto)}</div></div>`;
+  }
+  function ligarFormAnot(v, clienteId) {
+    const f = v.querySelector('#anotForm');
+    if (f) f.addEventListener('submit', async e => {
+      e.preventDefault();
+      const b = f.querySelector('button[type=submit]'); b.disabled = true;
+      try {
+        const j = await acao('anotacao_salvar', { cliente_id: clienteId || null, texto: f.texto.value, publica: !!(f.publica && f.publica.checked) });
+        D.anotacoes = [j.row].concat(D.anotacoes || []);
+        toast('Anotação salva.'); render(true);
+      } catch (er) { if (er.message !== 'sessao') toast(er.message); b.disabled = false; }
+    });
+  }
+
+  /* ---------------- MINHAS ANOTAÇÕES (diário / relatório da semana) ---------------- */
+  function diario() {
+    const quem = D.me.dono && S.diarioDe ? S.diarioDe : D.me.id;
+    const l = (D.anotacoes || []).filter(n => !n.cliente_id && n.membro_id === quem);
+    const grupos = {};
+    l.forEach(n => { const k = ymd(segundaDe(new Date(n.criado_em))); (grupos[k] = grupos[k] || []).push(n); });
+    const autores = D.me.dono ? [...new Set((D.anotacoes || []).filter(n => !n.cliente_id).map(n => n.membro_id))] : [];
+    posRender.push(v => ligarFormAnot(v, null));
+    return cab('Minhas anotações', 'Relatório da semana, observações sobre você e lembretes.',
+        D.me.dono ? `<select data-set="diarioDe" aria-label="De quem">${opcoes([['', 'Minhas'], ...[...D.membros].filter(m => m.id !== D.me.id && autores.includes(m.id)).sort(porNome).map(m => [m.id, m.nome])], S.diarioDe || '')}</select>` : '') +
+      (quem === D.me.id ? `<div class="card nota-nova"><form id="anotForm" class="form">
+        <textarea name="texto" maxlength="4000" required placeholder="Como foi sua semana? O que deu certo, o que precisa melhorar, o que não pode esquecer…"></textarea>
+        <div class="r"><button class="btn btn-primary" type="submit">${ic('note')}<span>Salvar</span></button></div></form></div>` : '') +
+      (Object.keys(grupos).length ? Object.entries(grupos).sort((a, b) => b[0].localeCompare(a[0])).map(([k, arr]) =>
+        `<h2 class="sec">Semana de ${dataBr(k)} a ${dataBr(ymd(somaDias(parseYmd(k), 6)))}</h2><div class="items">${arr.map(cartaoAnot).join('')}</div>`).join('') : vazio('Nenhuma anotação ainda.'));
+  }
+
+  /* ---------------- COMUNICADO DE ABERTURA ---------------- */
+  const comunicadoPendente = () => (D.comunicados || []).find(c => c.ativo && c.criado_por !== D.me.id
+    && (!(c.para || []).length || c.para.includes(D.me.id)) && !(c.leituras || []).some(l => l.membro_id === D.me.id));
+  function mostrarComunicado() {
+    const c = comunicadoPendente();
+    if (!c || document.querySelector('.comunicado')) return;
+    const ov = document.createElement('div');
+    ov.className = 'comunicado';
+    ov.innerHTML = `<div class="com-card" role="alertdialog" aria-modal="true">
+      <div class="com-ic">${ic('megaphone', 26)}</div>
+      <div class="com-de">Comunicado de ${esc(primeiroNome(nomeMembro(c.criado_por)))} · ${dataHoraBr(c.criado_em)}</div>
+      <h2>${esc(c.titulo)}</h2><div class="com-t">${esc(c.texto)}</div>
+      <label class="com-chk"><input type="checkbox"> Li o recado</label>
+      <button class="btn btn-primary" disabled>OK</button></div>`;
+    document.body.appendChild(ov);
+    document.documentElement.classList.add('modal-aberto');
+    const chk = ov.querySelector('input'), ok = ov.querySelector('button');
+    chk.addEventListener('change', () => { ok.disabled = !chk.checked; });
+    ok.addEventListener('click', async () => {
+      ok.disabled = true;
+      try { await acao('comunicado_ler', { id: c.id }); } catch (e) { if (e.message === 'sessao') return; }
+      (c.leituras = c.leituras || []).push({ membro_id: D.me.id, lido_em: new Date().toISOString() });
+      ov.remove();
+      if (!document.querySelector('.overlay')) document.documentElement.classList.remove('modal-aberto');
+      mostrarComunicado();
+    });
+  }
+  function comunicados() {
+    if (!gestao()) return inicio();
+    const l = D.comunicados || [];
+    return cab('Comunicados', 'Mensagem que aparece em tela cheia assim que a pessoa entra. Ela só usa o painel depois de marcar “Li o recado”.', btn('comunicadoNovo', 'Novo comunicado', 'plus', 'btn-primary')) +
+      (l.length ? `<div class="items">${l.map(c => {
+        const alvo = (c.para || []).length ? c.para : D.membros.map(m => m.id).filter(id => id !== c.criado_por);
+        const leram = (c.leituras || []).map(x => x.membro_id);
+        const falta = alvo.filter(id => !leram.includes(id));
+        return `<div class="item com-item${c.ativo ? '' : ' fim'}"><div class="t"><b>${esc(c.titulo)}</b><span class="tag ${c.ativo ? 'ok' : ''}">${c.ativo ? 'Ativo' : 'Encerrado'}</span>
+          <span class="small muted">${esc(primeiroNome(nomeMembro(c.criado_por)))} · ${dataHoraBr(c.criado_em)}</span>
+          ${c.ativo ? `<span class="acts-inline">${btn('comunicadoEncerrar', 'Encerrar', '', 'btn-sm btn-ghost', c.id)}</span>` : ''}</div>
+          <div class="d">${esc(c.texto)}</div>
+          <div class="small" style="margin-top:.5rem"><span class="green-t">✓ Leram (${leram.length}):</span> ${leram.map(id => esc(primeiroNome(nomeMembro(id)))).join(', ') || '—'}
+          ${falta.length && c.ativo ? `<br><span class="muted">Ainda não leram: ${falta.map(id => esc(primeiroNome(nomeMembro(id)))).join(', ')}</span>` : ''}</div></div>`;
+      }).join('')}</div>` : vazio('Nenhum comunicado ainda.'));
+  }
+  function formComunicado() {
+    const lista = [...D.membros].filter(m => m.id !== D.me.id).sort(porNome);
+    modal('Novo comunicado', `
+      <label>Título<input name="titulo" maxlength="120" required placeholder="Ex.: Prioridades da semana"></label>
+      <label>Mensagem<textarea name="texto" maxlength="3000" required style="min-height:140px"></textarea></label>
+      <div><div class="lbl">Para quem <span class="hint">(nenhum marcado = equipe toda)</span></div>
+        <div class="filters tight"><select data-fpart aria-label="Filtrar por função">${optAreas('')}</select>
+          <button type="button" class="btn btn-sm btn-ghost" data-todos>Marcar visíveis</button><button type="button" class="btn btn-sm btn-ghost" data-nenhum>Limpar</button></div>
+        <div class="people">${lista.map(m => `<label data-funcao="${esc(m.funcao || '')}"><input type="checkbox" name="part" value="${m.id}" data-multi="1"><span class="avatar xs">${esc(iniciais(m.nome))}</span><span>${esc(m.nome)}<small>${esc(m.funcao || 'Gestão')}</small></span></label>`).join('')}</div></div>`,
+    async (f, form) => {
+      const para = [...form.querySelectorAll('input[name=part]:checked')].map(c => c.value);
+      const j = await acao('comunicado_enviar', { titulo: f.titulo, texto: f.texto, para });
+      D.comunicados = [j.row].concat(D.comunicados || []);
+      toast('Comunicado publicado.');
+    }, { saveLabel: 'Publicar', wide: true, setup: ligarPessoas });
+  }
+
   const dominio = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
   const iconeLink = u => (/drive\.google|docs\.google/.test(u) ? 'file' : /trello|notion|asana|clickup/.test(u) ? 'board' : 'link');
   const segundaDe = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
@@ -1838,7 +1926,7 @@
     P.push({ rota: 'tarefas', alvo: '#view [data-act=tarefaNova]', titulo: 'Nova tarefa', texto: gestao() ? 'Crie e atribua tarefas: escolha a função (Social media, Video maker ou Design) e a pessoa, o prazo e quem recebe avisos por e-mail.' : 'Crie tarefas para você mesma(o) e organize sua semana. As tarefas que a gestão cria para você chegam sozinhas, marcadas como “Nova”.' });
     P.push({ rota: 'calendario', alvo: '.cal', titulo: 'Calendário', texto: 'O mês inteiro: reuniões, entregas, prazos de tarefas e publicações. Toque em um dia para ver tudo o que tem nele.' });
     P.push({ rota: 'calendario', alvo: '[data-act=adicionarDia]', titulo: 'Adicionar neste dia', texto: gestao() ? 'Escolha o dia e adicione uma tarefa para alguém (o prazo já vem preenchido) ou uma reunião, entrega ou prazo para a equipe.' : 'Escolha o dia e crie uma tarefa para você com aquele prazo.' });
-    P.push({ rota: 'clientes', alvo: '#view .ph', titulo: 'Clientes', texto: 'A ficha de cada cliente tem abas: visão geral (com links úteis), identidade visual (cores, música e tipografias), onboarding e formulário em PDF, observações da semana, anotações pessoais (só você e a direção veem) e tarefas.' });
+    P.push({ rota: 'clientes', alvo: '#view .ph', titulo: 'Clientes', texto: 'A ficha de cada cliente tem abas: visão geral (com links úteis), identidade visual (cores, música e tipografias), onboarding e formulário em PDF, observações da semana, anotações (privadas ou para a equipe) e tarefas.' });
     P.push({ rota: 'fluxograma', alvo: '#view .ph', titulo: 'Fluxograma', texto: 'Como o trabalho anda, etapa por etapa, e quem executa cada uma. As etapas da sua função aparecem destacadas.' });
     P.push({ rota: 'processos', alvo: '#view .items', titulo: 'Checklist de qualidade', texto: 'Antes de enviar uma peça, confira item por item e vá ticando. O checklist fica salvo só para você e dá para recomeçar.' });
     if (gestao()) P.push({ rota: 'solicitacoes', alvo: '#view .ph', titulo: 'Solicitações de atendimento', texto: 'Peça algo para alguém da equipe com prazo (em 1 hora, até o fim do dia…). A pessoa recebe com som, fica fixo no Início dela e você vê quando foi vista e atendida — e em quanto tempo.' });
@@ -1952,8 +2040,14 @@
     anotEditar: id => {
       const n = (D.anotacoes || []).find(x => x.id === id);
       if (!n) return;
-      modal('Editar anotação', `<label>Anotação<textarea name="texto" maxlength="4000" required style="min-height:140px">${esc(n.texto)}</textarea></label>`,
-        async f => { const j = await acao('anotacao_salvar', { id, texto: f.texto }); Object.assign(n, j.row); toast('Anotação salva.'); });
+      modal('Editar anotação', `<label>Anotação<textarea name="texto" maxlength="4000" required style="min-height:140px">${esc(n.texto)}</textarea></label>
+        ${n.cliente_id ? `<label class="inline"><input type="checkbox" name="publica"${n.publica ? ' checked' : ''}> Visível para toda a equipe</label>` : ''}`,
+        async f => { const j = await acao('anotacao_salvar', { id, cliente_id: n.cliente_id, texto: f.texto, publica: !!f.publica }); Object.assign(n, j.row); toast('Anotação salva.'); });
+    },
+    comunicadoNovo: () => formComunicado(),
+    comunicadoEncerrar: async id => {
+      if (!confirm('Encerrar este comunicado? Quem ainda não leu não verá mais.')) return;
+      try { await acao('comunicado_encerrar', { id }); const c = D.comunicados.find(x => x.id === id); if (c) c.ativo = false; render(true); } catch (e) { if (e.message !== 'sessao') toast(e.message); }
     },
     anotExcluir: async id => {
       if (!confirm('Excluir esta anotação?')) return;

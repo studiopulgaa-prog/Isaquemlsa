@@ -695,3 +695,14 @@ body.protegido input,body.protegido textarea{-webkit-user-select:text;user-selec
 .perm-list label.travada{opacity:.6;cursor:not-allowed}
 .aviso-priv{display:flex;gap:.5rem;align-items:center;background:var(--info-bg);color:var(--info);border-radius:10px;padding:.6rem .8rem;font-size:.86rem;margin-bottom:.8rem}
 .item.anot .t{gap:.4rem}
+.r.spread{justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap}
+.comunicado{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(20,10,4,.45);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.com-card{width:100%;max-width:520px;max-height:90vh;overflow-y:auto;background:var(--surface);border-radius:20px;padding:1.6rem;box-shadow:0 24px 70px #0008;text-align:center;display:flex;flex-direction:column;align-items:center;gap:.6rem;animation:sobe .2s ease-out}
+.com-ic{width:56px;height:56px;border-radius:16px;background:var(--warn-bg);color:var(--warn);display:flex;align-items:center;justify-content:center}
+.com-de{font-size:.8rem;color:var(--muted)}
+.com-card h2{font-size:1.4rem;font-weight:700}
+.com-t{white-space:pre-wrap;text-align:left;align-self:stretch;background:var(--surface-2);border-radius:12px;padding:.9rem 1rem;font-size:.98rem;line-height:1.55}
+.com-chk{display:flex;align-items:center;gap:.5rem;font-weight:600;margin-top:.3rem;cursor:pointer}
+.com-chk input{width:20px;height:20px}
+.com-card .btn{min-width:140px;padding:.7rem 1.2rem}
+.com-item.fim{opacity:.7}

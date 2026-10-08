@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
       membro_id: me.id, sessao, dispositivo: dispositivo + (b.app ? ' (app)' : ''),
       area: b.area === 'admin' ? 'admin' : 'equipe'
     });
-    send(res, 200, { ok: true, nao_lidos: (r && r.nao_lidos) || 0, ultimo: (r && r.ultimo) || null });
+    send(res, 200, { ok: true, nao_lidos: (r && r.nao_lidos) || 0, ultimo: (r && r.ultimo) || null, conteudo: (r && r.conteudo) || null, comunicados: (r && r.comunicados) || 0 });
   } catch (e) {
     send(res, 500, { ok: false });
   }
