@@ -245,13 +245,15 @@
       return;
     }
     $('#senha').value = '';
-    carregar();
+    carregar(true);
   });
 
   /* ---------------- carga ---------------- */
-  async function carregar() {
+  async function carregar(aposLogin, tentativa = 0) {
     const { status, j } = await api('/api/dados?area=' + AREA);
-    if (status === 401) return mostrarLogin();
+    // Logo depois do login o navegador às vezes ainda não gravou o cookie da sessão: tenta de novo antes de desistir
+    if ((status === 401 || status === 0) && aposLogin && tentativa < 3) { await new Promise(r => setTimeout(r, 350 * (tentativa + 1))); return carregar(true, tentativa + 1); }
+    if (status === 401) return mostrarLogin(aposLogin ? 'Não foi possível abrir o painel. Tente entrar de novo.' : '');
     if (status === 403) return mostrarLogin('Seu login não tem acesso ao painel de gestão.<br><a href="/">Ir para o site da equipe</a>');
     if (!j.ok) return mostrarLogin(esc(j.erro || 'Erro ao carregar. Tente de novo.'));
     D = j;
@@ -1212,7 +1214,7 @@
   }
 
   const LISTAS = [['sobre', 'Sobre'], ['objetivo', 'Objetivo'], ['posicionamento', 'Posicionamento'], ['ideias', 'Ideias'], ['atencao', 'Pontos de atenção'], ['como_agir', 'Como agir']];
-  const ABAS = [['geral', 'Visão geral'], ['identidade', 'Identidade visual'], ['onboarding', 'Onboarding e formulário'], ['semana', 'Observações da semana'], ['tarefas', 'Tarefas']];
+  const ABAS = [['geral', 'Visão geral'], ['identidade', 'Identidade visual'], ['onboarding', 'Onboarding e formulário'], ['semana', 'Observações da semana'], ['anotacoes', 'Anotações pessoais'], ['tarefas', 'Tarefas']];
 
   function fichaCliente(id, aba = 'geral') {
     const c = cliente(id);
@@ -1221,7 +1223,8 @@
     const notas = (D.notas || []).filter(n => n.cliente_id === c.id);
     const arqs = (D.arquivos || []).filter(a => a.cliente_id === c.id);
     const abertas = D.tarefas.filter(t => t.cliente_id === c.id && t.status !== 'feito');
-    const cont = { semana: notas.length, onboarding: arqs.length, tarefas: abertas.length };
+    const anots = (D.anotacoes || []).filter(n => n.cliente_id === c.id);
+    const cont = { semana: notas.length, onboarding: arqs.length, tarefas: abertas.length, anotacoes: anots.filter(n => n.membro_id === D.me.id).length };
     let corpo = '';
     if (aba === 'geral') {
       const plano = conteudo('planos').find(p => p.titulo && c.plano && c.plano.toLowerCase().includes(p.titulo.toLowerCase()));
@@ -1277,6 +1280,31 @@
             const j = await acao('nota_salvar', { row: { cliente_id: c.id, tipo: f.tipo.value, texto: f.texto.value } });
             D.notas = [j.row].concat(D.notas || []);
             toast('Registrado.'); render(true);
+          } catch (er) { if (er.message !== 'sessao') toast(er.message); b.disabled = false; }
+        });
+      });
+    } else if (aba === 'anotacoes') {
+      const minhas = anots.filter(n => n.membro_id === D.me.id);
+      const outras = D.me.dono ? anots.filter(n => n.membro_id !== D.me.id) : [];
+      const cartao = (n, minha) => `<div class="item anot">
+        <div class="t"><span class="small muted">${minha ? 'Você' : esc(nomeMembro(n.membro_id))} · ${dataHoraBr(n.atualizado_em)}</span>
+        ${minha ? `<span class="acts-inline"><button class="icon-btn sm" data-act="anotEditar" data-id="${n.id}" title="Editar">${ic('edit', 14)}</button><button class="icon-btn sm" data-act="anotExcluir" data-id="${n.id}" title="Excluir">${ic('trash', 14)}</button></span>` : ''}</div>
+        <div class="d">${esc(n.texto)}</div></div>`;
+      corpo = `<div class="aviso-priv">${ic('lock', 14)}<span>${D.me.dono ? 'Suas anotações pessoais. Abaixo, você (dono) também vê as anotações de cada pessoa da equipe sobre este cliente.' : 'Suas anotações pessoais sobre este cliente. Ninguém da equipe vê — só você e a direção.'}</span></div>
+        <div class="card nota-nova"><form id="anotForm" class="form">
+          <textarea name="texto" maxlength="4000" required placeholder="Ex.: prefere ser chamada por áudio, gosta de referências minimalistas…"></textarea>
+          <div class="r"><button class="btn btn-primary" type="submit">${ic('note')}<span>Salvar anotação</span></button></div></form></div>` +
+        (minhas.length ? `<h2 class="sec">Minhas anotações <span class="count">${minhas.length}</span></h2><div class="items">${minhas.map(n => cartao(n, true)).join('')}</div>` : vazio('Você ainda não tem anotações sobre este cliente.')) +
+        (D.me.dono ? `<h2 class="sec">Anotações da equipe <span class="count">${outras.length}</span></h2>` + (outras.length ? `<div class="items">${outras.map(n => cartao(n, false)).join('')}</div>` : vazio('Ninguém da equipe fez anotações sobre este cliente.')) : '');
+      posRender.push(v => {
+        const f = v.querySelector('#anotForm');
+        if (f) f.addEventListener('submit', async e => {
+          e.preventDefault();
+          const b = f.querySelector('button'); b.disabled = true;
+          try {
+            const j = await acao('anotacao_salvar', { cliente_id: c.id, texto: f.texto.value });
+            D.anotacoes = [j.row].concat(D.anotacoes || []);
+            toast('Anotação salva.'); render(true);
           } catch (er) { if (er.message !== 'sessao') toast(er.message); b.disabled = false; }
         });
       });
@@ -1653,6 +1681,10 @@
 
 
   /* ---------------- EQUIPE ---------------- */
+  const PERMS_ADMIN = ['acesso_gestao', 'gerenciar_equipe'];
+  const ehAdmin = m => !!m && (m.dono || (m.permissoes || []).some(p => PERMS_ADMIN.includes(p)));
+  // Dono edita todos; quem gerencia a equipe sem ser dono edita só colaboradores (nunca a si mesmo nem administradores)
+  const podeEditarMembro = m => can('gerenciar_equipe') && (D.me.dono || (m.id !== D.me.id && !ehAdmin(m)));
   function equipe() {
     const gere = can('gerenciar_equipe');
     const nomesPerm = Object.fromEntries((D.permissoes || []).map(p => [p.k, p.t]));
@@ -1662,7 +1694,7 @@
       gere ? btn('membroNovo', 'Novo membro', 'plus', 'btn-primary') : '') +
       Object.entries(grupos).map(([g, l]) => `<h2 class="sec">${esc(g)} <span class="count">${l.length}</span></h2><div class="grid">${l.map(m => `<div class="card">
         <div class="mem"><div class="avatar">${esc(iniciais(m.nome))}</div><div style="flex:1;min-width:0"><div class="nm">${esc(m.nome)}</div><div class="small muted">${esc(m.funcao || '')}</div></div>
-        ${gere ? `<button class="icon-btn" data-act="membroEditar" data-id="${m.id}" title="Editar">${ic('edit')}</button>` : ''}</div>
+        ${gere && podeEditarMembro(m) ? `<button class="icon-btn" data-act="membroEditar" data-id="${m.id}" title="Editar">${ic('edit')}</button>` : gere && ehAdmin(m) && !m.dono ? `<span class="tag" title="Só o dono altera administradores">${ic('lock', 11)}Admin</span>` : ''}</div>
         ${gere ? `<div class="small muted" style="margin-top:.5rem">Usuário: <b>${esc(m.usuario || '')}</b>${m.email ? ` · ${esc(m.email)}` : ''}</div>
           <div class="perms">${m.dono ? '<span class="tag ok">Dono · acesso total</span>' : (m.permissoes || []).length ? m.permissoes.map(p => `<span class="tag">${esc(nomesPerm[p] || p)}</span>`).join('') : '<span class="tag">Só o site da equipe</span>'}</div>` : ''}
       </div>`).join('')}</div>`).join('');
@@ -1674,7 +1706,8 @@
     let grupo = '';
     const lista = perms.map(p => {
       const g = p.grupo !== grupo ? `<div class="g">${esc((grupo = p.grupo))}</div>` : '';
-      return g + `<label><input type="checkbox" name="perm" value="${p.k}" data-multi="1"${tem.has(p.k) ? ' checked' : ''}${m.dono ? ' disabled checked' : ''}><div><b>${esc(p.t)}</b><span>${esc(p.d)}</span></div></label>`;
+      const travada = !D.me.dono && PERMS_ADMIN.includes(p.k);
+      return g + `<label class="${travada ? 'travada' : ''}"><input type="checkbox" name="perm" value="${p.k}" data-multi="1"${tem.has(p.k) ? ' checked' : ''}${m.dono ? ' disabled checked' : travada ? ' disabled' : ''}><div><b>${esc(p.t)}${travada ? ' 🔒' : ''}</b><span>${esc(p.d)}${travada ? ' Só o dono pode dar ou tirar esta permissão.' : ''}</span></div></label>`;
     }).join('');
     modal(m.id ? `Editar ${m.nome}` : 'Novo membro', `
       <input type="hidden" name="id" value="${esc(m.id || '')}">
@@ -1691,7 +1724,7 @@
         <label>Ordem na lista<input type="number" name="ordem" value="${esc(m.ordem ?? 0)}"></label>
       </div>
       <div><div class="lbl">Permissões ${m.dono ? '<span class="hint">(dono tem acesso total)</span>' : ''}</div>
-        ${m.dono ? '' : `<div class="filters tight"><button type="button" class="btn btn-sm" data-adm>${ic('key', 14)}<span>Tornar administrador</span></button><button type="button" class="btn btn-sm btn-ghost" data-colab>Só colaborador</button></div>`}
+        ${m.dono || !D.me.dono ? '' : `<div class="filters tight"><button type="button" class="btn btn-sm" data-adm>${ic('key', 14)}<span>Tornar administrador</span></button><button type="button" class="btn btn-sm btn-ghost" data-colab>Só colaborador</button></div>`}
         <div class="perm-list">${lista}</div></div>`,
     async (f, form) => {
       const permissoes = [...form.querySelectorAll('input[name=perm]:checked:not(:disabled)')].map(c => c.value);
@@ -1805,7 +1838,7 @@
     P.push({ rota: 'tarefas', alvo: '#view [data-act=tarefaNova]', titulo: 'Nova tarefa', texto: gestao() ? 'Crie e atribua tarefas: escolha a função (Social media, Video maker ou Design) e a pessoa, o prazo e quem recebe avisos por e-mail.' : 'Crie tarefas para você mesma(o) e organize sua semana. As tarefas que a gestão cria para você chegam sozinhas, marcadas como “Nova”.' });
     P.push({ rota: 'calendario', alvo: '.cal', titulo: 'Calendário', texto: 'O mês inteiro: reuniões, entregas, prazos de tarefas e publicações. Toque em um dia para ver tudo o que tem nele.' });
     P.push({ rota: 'calendario', alvo: '[data-act=adicionarDia]', titulo: 'Adicionar neste dia', texto: gestao() ? 'Escolha o dia e adicione uma tarefa para alguém (o prazo já vem preenchido) ou uma reunião, entrega ou prazo para a equipe.' : 'Escolha o dia e crie uma tarefa para você com aquele prazo.' });
-    P.push({ rota: 'clientes', alvo: '#view .ph', titulo: 'Clientes', texto: 'A ficha de cada cliente tem abas: visão geral (com links úteis), identidade visual (cores, música e tipografias), onboarding e formulário em PDF, observações da semana e tarefas.' });
+    P.push({ rota: 'clientes', alvo: '#view .ph', titulo: 'Clientes', texto: 'A ficha de cada cliente tem abas: visão geral (com links úteis), identidade visual (cores, música e tipografias), onboarding e formulário em PDF, observações da semana, anotações pessoais (só você e a direção veem) e tarefas.' });
     P.push({ rota: 'fluxograma', alvo: '#view .ph', titulo: 'Fluxograma', texto: 'Como o trabalho anda, etapa por etapa, e quem executa cada uma. As etapas da sua função aparecem destacadas.' });
     P.push({ rota: 'processos', alvo: '#view .items', titulo: 'Checklist de qualidade', texto: 'Antes de enviar uma peça, confira item por item e vá ticando. O checklist fica salvo só para você e dá para recomeçar.' });
     if (gestao()) P.push({ rota: 'solicitacoes', alvo: '#view .ph', titulo: 'Solicitações de atendimento', texto: 'Peça algo para alguém da equipe com prazo (em 1 hora, até o fim do dia…). A pessoa recebe com som, fica fixo no Início dela e você vê quando foi vista e atendida — e em quanto tempo.' });
@@ -1914,6 +1947,17 @@
     notaExcluir: async id => {
       if (!confirm('Excluir esta observação?')) return;
       try { await acao('nota_excluir', { id }); D.notas = D.notas.filter(n => n.id !== id); render(true); }
+      catch (e) { if (e.message !== 'sessao') toast(e.message); }
+    },
+    anotEditar: id => {
+      const n = (D.anotacoes || []).find(x => x.id === id);
+      if (!n) return;
+      modal('Editar anotação', `<label>Anotação<textarea name="texto" maxlength="4000" required style="min-height:140px">${esc(n.texto)}</textarea></label>`,
+        async f => { const j = await acao('anotacao_salvar', { id, texto: f.texto }); Object.assign(n, j.row); toast('Anotação salva.'); });
+    },
+    anotExcluir: async id => {
+      if (!confirm('Excluir esta anotação?')) return;
+      try { await acao('anotacao_excluir', { id }); D.anotacoes = D.anotacoes.filter(n => n.id !== id); render(true); }
       catch (e) { if (e.message !== 'sessao') toast(e.message); }
     },
     qaLimpar: () => { try { localStorage.removeItem(qaChave()); } catch {} render(true); },

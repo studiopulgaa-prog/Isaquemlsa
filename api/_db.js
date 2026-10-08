@@ -1,6 +1,6 @@
 // Acesso ao banco (Supabase) — só pelo servidor, com segredo que nunca vai ao navegador
 // Operações que moram na função eq_rpc_extra
-const EXTRA = new Set(['acesso_ping', 'acessos_listar']);
+const EXTRA = new Set(['acesso_ping', 'acessos_listar', 'anotacoes_listar', 'anotacao_salvar', 'anotacao_excluir']);
 
 async function rpc(op, args = {}) {
   if (global.__EQ_MOCK__) return global.__EQ_MOCK__(op, args);

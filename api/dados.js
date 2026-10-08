@@ -32,13 +32,16 @@ module.exports = async (req, res) => {
     const avisos = (d.avisos || []).filter(a => a.membro_id === me.id || (['recado', 'solicitacao'].includes(a.tipo) && a.de_id === me.id)
       || (a.tipo === 'solicitacao' && pode(me, 'acesso_gestao')));
 
+    // Anotações pessoais: cada um recebe só as suas; o dono recebe todas
+    const anotacoes = await rpc('anotacoes_listar', { membro_id: me.dono ? null : me.id });
+
     const perms = PERMISSOES.map(p => p.k).filter(k => pode(me, k));
     send(res, 200, {
       ok: true, area,
       me: { id: me.id, nome: me.nome, funcao: me.funcao, usuario: me.usuario, email: me.email || '', dono: me.dono, perms, tutorial_versao: me.tutorial_versao || 0 },
       permissoes: pode(me, 'acesso_gestao') ? PERMISSOES : [],
       clientes: d.clientes, conteudo, tarefas, publicacoes: d.publicacoes, membros,
-      eventos, notas: d.notas || [], arquivos: d.arquivos || [], avisos, contatos: d.contatos || []
+      eventos, notas: d.notas || [], arquivos: d.arquivos || [], avisos, contatos: d.contatos || [], anotacoes: anotacoes || []
     });
   } catch (e) {
     send(res, 500, { ok: false, erro: 'Erro ao carregar. Tente de novo.' });

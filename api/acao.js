@@ -21,6 +21,10 @@ const dataBr = d => (d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '');
 async function avisar(row) { try { await rpc('upsert', { tabela: 'eq_avisos', row }); } catch (e) {} }
 async function enfileirar(m) { try { await rpc('email_enfileirar', m); } catch (e) {} }
 
+// Administrador = dono ou quem tem painel de gestão / gerencia a equipe
+const PERMS_ADMIN = ['acesso_gestao', 'gerenciar_equipe'];
+const ehAdmin = m => !!m && (m.dono || (m.permissoes || []).some(p => PERMS_ADMIN.includes(p)));
+
 class Negado extends Error {}
 const exigir = (ok, msg = 'Você não tem permissão para isso.') => { if (!ok) throw new Negado(msg); };
 
@@ -376,12 +380,20 @@ module.exports = async (req, res) => {
         };
         exigir(row.nome && row.usuario, 'Preencha nome e usuário.');
         exigir(row.email !== null, 'E-mail inválido.');
+        // Só o dono mexe em administradores. Quem gerencia a equipe sem ser dono cuida apenas de colaboradores:
+        // não altera a si mesmo, não mexe em outros administradores e não dá nem tira permissões de administrador.
         if (uuid(r.id)) {
           const alvo = await rpc('get', { tabela: 'eq_membros', id: r.id });
           exigir(alvo, 'Membro não encontrado.');
           exigir(!alvo.dono || me.dono, 'Só o dono pode alterar o próprio cadastro de dono.');
+          if (!me.dono) {
+            exigir(alvo.id !== me.id, 'Você não pode alterar as suas próprias permissões. Para trocar sua senha ou e-mail, use Minha conta.');
+            exigir(!ehAdmin(alvo), 'Só o dono pode alterar outros administradores.');
+          }
           row.id = r.id;
-        } else {
+        }
+        if (!me.dono) exigir(!row.permissoes.some(p => PERMS_ADMIN.includes(p)), 'Só o dono pode tornar alguém administrador.');
+        if (!uuid(r.id)) {
           exigir(str(b.senha).length >= 6, 'Defina uma senha inicial com pelo menos 6 caracteres.');
         }
         try { out.row = await rpc('upsert', { tabela: 'eq_membros', row }); }
@@ -397,7 +409,25 @@ module.exports = async (req, res) => {
         const alvo = await rpc('get', { tabela: 'eq_membros', id: uuid(b.id) });
         exigir(alvo && !alvo.dono, 'O dono não pode ser removido.');
         exigir(alvo.id !== me.id, 'Você não pode remover a si mesmo.');
+        exigir(me.dono || !ehAdmin(alvo), 'Só o dono pode remover administradores.');
         await rpc('remover', { tabela: 'eq_membros', id: alvo.id });
+        break;
+      }
+      // ---------- ANOTAÇÕES PESSOAIS DE CLIENTE (só quem escreveu vê; o dono vê todas) ----------
+      case 'anotacao_salvar': {
+        const texto = str(b.texto, 4000);
+        exigir(texto, 'Escreva a anotação.');
+        if (!uuid(b.id)) {
+          const c = await rpc('get', { tabela: 'eq_clientes', id: uuid(b.cliente_id) });
+          exigir(c && !c.removido, 'Cliente não encontrado.');
+        }
+        out.row = await rpc('anotacao_salvar', { id: uuid(b.id), membro_id: me.id, cliente_id: uuid(b.cliente_id), texto });
+        exigir(out.row, 'Só quem escreveu pode editar esta anotação.');
+        break;
+      }
+      case 'anotacao_excluir': {
+        const r = await rpc('anotacao_excluir', { id: uuid(b.id), membro_id: me.id });
+        exigir(r && r.ok, 'Só quem escreveu pode excluir esta anotação.');
         break;
       }
       case 'meu_email': {

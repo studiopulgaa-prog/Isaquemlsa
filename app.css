@@ -692,3 +692,6 @@ body.protegido input,body.protegido textarea{-webkit-user-select:text;user-selec
   .tour-card,.tour-card.centro{left:12px!important;right:12px;width:auto;bottom:calc(12px + env(safe-area-inset-bottom));top:auto;transform:none!important}
 }
 .novidades{padding-left:1.2rem;display:grid;gap:.5rem}
+.perm-list label.travada{opacity:.6;cursor:not-allowed}
+.aviso-priv{display:flex;gap:.5rem;align-items:center;background:var(--info-bg);color:var(--info);border-radius:10px;padding:.6rem .8rem;font-size:.86rem;margin-bottom:.8rem}
+.item.anot .t{gap:.4rem}
